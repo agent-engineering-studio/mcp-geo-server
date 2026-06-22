@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-geo-server"
+version = "0.1.0"
+description = "MCP server (FastMCP) to drive a GeoServer instance: REST admin + OGC WMS/WFS/WFS-T + SLD styles, with a Leaflet test UI."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Agent Engineering Studio" }]
+dependencies = [
+    "agent-framework>=1.9",
+    "mcp>=1.0",
+    "httpx>=0.27",
+    "jinja2>=3.1",
+    "starlette>=0.37",
+    "uvicorn>=0.29",
+    "anyio>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+webui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+]
+
+[project.scripts]
+mcp-geo-server = "mcp_geo_server.server:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mcp_geo_server = ["templates/*.j2"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

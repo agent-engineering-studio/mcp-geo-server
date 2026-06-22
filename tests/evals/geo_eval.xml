@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Read-only evaluation questions for an AI agent driving mcp-geo-server against
+  a GeoServer instance with the STANDARD sample data (workspaces topp, sf, tiger,
+  nurc, cite). The expected answers below reflect the default GeoServer release
+  data directory.
+
+  IMPORTANT: sample data can vary between GeoServer versions. Re-run these tools
+  on YOUR live instance and confirm the expected_answer values before relying on
+  them as a graded eval.
+-->
+<evaluation name="geoserver-sample-data-readonly">
+
+  <question id="states-count">
+    <prompt>How many features are in the layer topp:states? Use WFS GetFeature.</prompt>
+    <tool>geo_wfs_get_feature</tool>
+    <args type_name="states" workspace="topp" count="1000"/>
+    <expected_answer>49</expected_answer>
+    <check>Count the features in the returned FeatureCollection.</check>
+  </question>
+
+  <question id="states-bbox">
+    <prompt>What is the lat/lon bounding box of topp:states (continental USA)?</prompt>
+    <tool>geo_get_layer_bbox</tool>
+    <args name="states" workspace="topp"/>
+    <expected_answer>Roughly minx=-124.7, miny=24.9, maxx=-66.9, maxy=49.4 (EPSG:4326).</expected_answer>
+    <check>latLonBoundingBox covers the contiguous United States.</check>
+  </question>
+
+  <question id="topp-layers">
+    <prompt>Which layers exist in the topp workspace?</prompt>
+    <tool>geo_list_layers</tool>
+    <args workspace="topp"/>
+    <expected_answer>states and tasmania_* are typical; at minimum topp:states is present.</expected_answer>
+    <check>The list includes "states".</check>
+  </question>
+
+  <question id="workspaces-present">
+    <prompt>List the workspaces available on the server.</prompt>
+    <tool>geo_list_workspaces</tool>
+    <args/>
+    <expected_answer>The default sample set includes topp, sf, tiger, nurc and cite.</expected_answer>
+    <check>"topp" appears among the returned workspace names.</check>
+  </question>
+
+  <question id="texas-filter">
+    <prompt>Use a CQL filter to fetch the single feature where STATE_NAME = 'Texas' from topp:states.</prompt>
+    <tool>geo_wfs_get_feature</tool>
+    <args type_name="states" workspace="topp" cql_filter="STATE_NAME='Texas'"/>
+    <expected_answer>Exactly 1 feature, with STATE_ABBR = "TX".</expected_answer>
+    <check>One feature returned; properties.STATE_ABBR == "TX".</check>
+  </question>
+
+  <question id="status-version">
+    <prompt>Is the server reachable, and what GeoServer version is running?</prompt>
+    <tool>geo_get_status</tool>
+    <args/>
+    <expected_answer>connected = true and a GeoServer component version (e.g. 2.28.0).</expected_answer>
+    <check>connected is true and a version string is present.</check>
+  </question>
+
+</evaluation>

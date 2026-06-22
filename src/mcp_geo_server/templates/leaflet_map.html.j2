@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }}</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    html, body { height: 100%; margin: 0; }
+    #map { height: 100%; width: 100%; }
+    .map-title {
+      position: absolute; z-index: 1000; top: 10px; left: 50px;
+      background: rgba(255,255,255,0.85); padding: 4px 10px; border-radius: 4px;
+      font-family: system-ui, sans-serif; font-size: 14px; font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="map-title">{{ title }}</div>
+  <div id="map"></div>
+  <script>
+    const map = L.map("map");
+
+    // Basemap: OpenStreetMap (attribution is required by the OSM tile policy).
+    const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }).addTo(map);
+
+    const overlays = {};
+{% for layer in layers %}
+    const wms_{{ loop.index }} = L.tileLayer.wms("{{ wms_base }}", {
+      layers: "{{ layer.qualified }}",
+      format: "image/png",
+      transparent: true,
+      version: "1.1.1",
+      attribution: "GeoServer"
+    }).addTo(map);
+    overlays["{{ layer.qualified }}"] = wms_{{ loop.index }};
+{% endfor %}
+
+{% if geojson %}
+    const features = {{ geojson_json }};
+    const gj = L.geoJSON(features, {
+      onEachFeature: function (feature, lyr) {
+        if (feature.properties) {
+          const rows = Object.entries(feature.properties)
+            .map(([k, v]) => "<b>" + k + "</b>: " + v).join("<br>");
+          lyr.bindPopup(rows || "(no properties)");
+        }
+      }
+    }).addTo(map);
+    overlays["{{ geojson_name }} (GeoJSON)"] = gj;
+{% endif %}
+
+    L.control.layers({ "OpenStreetMap": osm }, overlays).addTo(map);
+
+{% if bounds %}
+    map.fitBounds({{ bounds }});
+{% else %}
+    map.setView([{{ center[0] }}, {{ center[1] }}], {{ zoom }});
+{% endif %}
+  </script>
+</body>
+</html>

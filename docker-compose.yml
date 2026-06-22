@@ -1,0 +1,106 @@
+name: mcp-geo-server
+
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    container_name: mcp-geo-server-postgis
+    environment:
+      POSTGRES_DB: gis
+      POSTGRES_USER: gis
+      POSTGRES_PASSWORD: gis
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gis -d gis"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  geoserver:
+    image: docker.osgeo.org/geoserver:2.28.0
+    container_name: mcp-geo-server-geoserver
+    depends_on:
+      postgis:
+        condition: service_healthy
+    environment:
+      GEOSERVER_ADMIN_USER: admin
+      GEOSERVER_ADMIN_PASSWORD: geoserver
+      # Let the browser-based test UI call the OGC services directly.
+      CORS_ENABLED: "true"
+    ports:
+      - "8080:8080"
+    volumes:
+      - gsdata:/opt/geoserver_data
+
+  # Local LLM backend for the intelligent MCP agent (no external API keys).
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mcp-geo-server-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollamadata:/root/.ollama
+
+  # Web UI (FastAPI + Leaflet). Same image as the MCP agent, default command.
+  webui:
+    build: .
+    image: mcp-geo-server:latest
+    container_name: mcp-geo-server-webui
+    depends_on:
+      geoserver:
+        condition: service_started
+    environment:
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_USER: admin
+      GEOSERVER_PASSWORD: geoserver
+      GEOSERVER_DEFAULT_SRS: EPSG:4326
+      WEBUI_PORT: "8000"
+      GEO_MAP_OUTPUT_DIR: /app/maps
+    ports:
+      - "8000:8000"
+
+  # Intelligent MCP server: GeoServer agent (Microsoft Agent Framework) exposed
+  # over streamable-HTTP at http://localhost:9000/mcp. Visible, long-lived.
+  mcp:
+    build: .
+    image: mcp-geo-server:latest
+    container_name: mcp-geo-server-mcp
+    command: ["python", "-m", "mcp_geo_server.server"]
+    depends_on:
+      geoserver:
+        condition: service_started
+      ollama:
+        condition: service_started
+    environment:
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_USER: admin
+      GEOSERVER_PASSWORD: geoserver
+      GEOSERVER_DEFAULT_SRS: EPSG:4326
+      # LLM provider: ollama (local, default) | ollama-cloud | anthropic
+      GEO_LLM_PROVIDER: ${GEO_LLM_PROVIDER:-ollama}
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5}
+      OLLAMA_CLOUD_HOST: ${OLLAMA_CLOUD_HOST:-https://ollama.com}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      GEO_MCP_TRANSPORT: http
+      GEO_MCP_HOST: 0.0.0.0
+      GEO_MCP_PORT: "9000"
+      GEO_MAP_OUTPUT_DIR: /app/maps
+    ports:
+      - "9000:9000"
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import socket; socket.create_connection(('127.0.0.1', 9000), timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  pgdata:
+  gsdata:
+  ollamadata:
