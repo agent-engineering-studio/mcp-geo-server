@@ -89,6 +89,7 @@ services:
       GEO_MCP_TRANSPORT: http
       GEO_MCP_HOST: 0.0.0.0
       GEO_MCP_PORT: "9000"
+      GEO_ALLOW_DESTRUCTIVE: ${GEO_ALLOW_DESTRUCTIVE:-false}
       GEO_MAP_OUTPUT_DIR: /app/maps
     ports:
       - "9000:9000"

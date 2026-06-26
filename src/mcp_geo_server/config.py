@@ -58,6 +58,7 @@ class Settings:
     mcp_transport: str
     mcp_host: str
     mcp_port: int
+    allow_destructive: bool
 
     @property
     def rest_base(self) -> str:
@@ -125,6 +126,7 @@ def _load() -> Settings:
         mcp_transport=(os.environ.get("GEO_MCP_TRANSPORT") or "stdio").strip().lower(),
         mcp_host=(os.environ.get("GEO_MCP_HOST") or "0.0.0.0").strip(),
         mcp_port=_as_int(os.environ.get("GEO_MCP_PORT"), 9000),
+        allow_destructive=_as_bool(os.environ.get("GEO_ALLOW_DESTRUCTIVE"), False),
     )
 
 

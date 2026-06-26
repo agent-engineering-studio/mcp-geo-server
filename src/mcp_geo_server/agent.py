@@ -17,6 +17,7 @@ from __future__ import annotations
 from agent_framework import Agent
 
 from .config import Settings, get_settings
+from .middleware import DestructiveGuard
 from .tools import collect_tools
 
 AGENT_NAME = "geoserver-agent"
@@ -96,4 +97,5 @@ def build_agent() -> Agent:
         description=AGENT_DESCRIPTION,
         instructions=INSTRUCTIONS,
         tools=collect_tools(),
+        middleware=[DestructiveGuard()],
     )

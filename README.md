@@ -79,6 +79,7 @@ cp .env.example .env   # then edit as needed
 | `GEO_MCP_TRANSPORT` | `stdio` | MCP transport: `stdio` or `http` |
 | `GEO_MCP_HOST` | `0.0.0.0` | Bind host when transport is `http` |
 | `GEO_MCP_PORT` | `9000` | Port when transport is `http` |
+| `GEO_ALLOW_DESTRUCTIVE` | `false` | Allow destructive tools (`geo_delete_*`, `geo_wfs_transaction`); blocked otherwise |
 
 Secrets are never hardcoded — everything is read from the environment.
 
@@ -205,8 +206,14 @@ exposed individually over MCP — the agent is). `make tools` lists them.
 | `geo_wfs_transaction` | write | WFS-T delete / update / raw |
 | `geo_build_web_map` | read | Generate a Leaflet HTML map (OSM + WMS overlays) |
 
-The agent's `instructions` (`agent.py`) tell it to treat `delete_*` as
-destructive and only run them on explicit request.
+### Destructive-operation safety
+
+A Microsoft Agent Framework **function middleware** (`middleware.py`,
+`DestructiveGuard`) intercepts destructive tools (`geo_delete_*` and
+`geo_wfs_transaction`). Unless `GEO_ALLOW_DESTRUCTIVE=true`, the call is
+short-circuited and the agent reports a refusal instead of mutating data — a
+deterministic guard that works even though the MCP server is non-interactive
+(no human-in-the-loop approval channel). Enable it explicitly to allow deletes.
 
 ## Resilience knobs
 
