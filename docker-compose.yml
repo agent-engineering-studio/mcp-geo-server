@@ -108,6 +108,10 @@ services:
         condition: service_started
     environment:
       GEOSERVER_URL: http://geoserver:8080/geoserver
+      # Browser-facing URL for WMS/legend in the UI (the container hostname is
+      # not reachable from the user's browser). Override if GeoServer is exposed
+      # on a different host/port.
+      GEOSERVER_PUBLIC_URL: ${GEOSERVER_PUBLIC_URL:-http://localhost:8080/geoserver}
       GEOSERVER_USER: admin
       GEOSERVER_PASSWORD: geoserver
       GEOSERVER_DEFAULT_SRS: EPSG:4326

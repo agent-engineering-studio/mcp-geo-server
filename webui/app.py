@@ -269,8 +269,8 @@ async def build_map(layers: str, workspace: str | None = None,
             bounds = _bounds_from_bbox(ft.get("latLonBoundingBox"))
         except GeoServerError:
             bounds = None
-    html = render_map(title=title, wms_base=client.settings.wms_base, layers=qlayers,
-                      bounds=bounds)
+    html = render_map(title=title, wms_base=client.settings.public_wms_base,
+                      layers=qlayers, bounds=bounds)
     out_dir = Path(client.settings.map_output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "webui_map.html"
@@ -283,7 +283,9 @@ async def config() -> dict:
     """Expose the bits the browser needs (e.g. the WMS base URL for Leaflet)."""
     client = get_client()
     return {
-        "wms_base": client.settings.wms_base,
+        # Browser-facing: the container hostname (geoserver:8080) is not
+        # reachable from the user's browser, so expose the public URL.
+        "wms_base": client.settings.public_wms_base,
         "default_workspace": client.settings.default_workspace,
         "default_srs": client.settings.default_srs,
     }
