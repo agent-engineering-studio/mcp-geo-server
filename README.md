@@ -145,14 +145,72 @@ For a stdio MCP client (`claude_desktop_config.json`), point `command` at
 uvicorn webui.app:app --reload --port 8000
 ```
 
-Open <http://localhost:8000>. The sidebar has a form for each operation (create
-workspace / PostGIS datastore, publish a feature type, create + assign a style,
-run a WFS query) plus a connection-status indicator. The map uses an
-**OpenStreetMap** basemap and shows selected layers as WMS overlays; the
-**"Carica come GeoJSON"** button fetches features via WFS and draws them with
-popups.
+Open <http://localhost:8000>. The map uses an **OpenStreetMap** basemap. The
+sidebar has:
 
-## 6. Tests
+- **🗣️ Comando (linguaggio naturale)** — type a request like *"mostrami le frane
+  lineari del Molise"*; an LLM maps it to the matching layer(s) and the map
+  renders them as WMS + zooms (`POST /api/ask`).
+- **🗂️ Esplora layer** — searchable list of all published layers; toggle each as
+  a WMS overlay and zoom to its extent (`GET /api/layers`).
+- **⬆️ Carica shapefile (.zip)** — upload a zipped shapefile; it is loaded into
+  PostGIS (`uploads` workspace) and published (`POST /api/upload`).
+- A **legend** box (bottom-right) showing `GetLegendGraphic` for every active
+  WMS layer, plus the original admin forms (workspace / datastore / publish /
+  styles / WFS) and a connection-status indicator.
+
+## 6. Data bootstrap & thematic styles
+
+**Bootstrap** — the `geo-init` container loads **every** shapefile under `./data`
+into PostGIS and publishes each as a GeoServer layer (workspace `ispra`,
+datastore `ispra_pg`), reprojecting to EPSG:4326. It is fully idempotent and
+transversal — it makes no assumption about folder names. It runs automatically
+on `make up`; re-run on demand:
+
+```bash
+make init          # load any new shapefiles + (re)apply styles
+make init-force    # drop & reload tables that already exist
+make styles        # only (re)apply the thematic styles
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `GEO_INIT_ENABLE` | `true` | Turn the bootstrap on/off |
+| `GEO_INIT_WORKSPACE` / `GEO_INIT_DATASTORE` | `ispra` / `ispra_pg` | Target workspace / PostGIS datastore |
+| `GEO_INIT_TARGET_SRS` | `EPSG:4326` | All layers reprojected to this SRS |
+| `GEO_INIT_SHAPE_ENCODING` | `ISO-8859-1` | Shapefile attribute encoding (ISPRA `.cst`) |
+| `GEO_INIT_FORCE` | `false` | Drop & reload existing tables |
+| `GEO_INIT_STYLES` | `true` | Apply the thematic styles after publishing |
+| `GEO_STYLES_CONFIG` | `/data/styles.yml` | Style config file (see below) |
+
+**Thematic styles are config-driven** — no SLD is hardcoded. The styles and the
+layer→style assignment live in a YAML file, so the **same stack serves any
+domain**. The active config is `data/styles.yml` (mounted at `/data/styles.yml`);
+if absent, the packaged `mcp_geo_server/styles_default.yml` (the ISPRA
+landslide/hazard domain) is used as a fallback.
+
+```yaml
+styles:                       # name -> SLD definition
+  frana_tipo_poly:
+    kind: polygon             # polygon | line | point | flat | outline
+    attribute: tipo_movim     # categorical: one rule per class
+    stroke: true
+    classes:
+      - {value: "1", label: "Crollo / Ribaltamento", color: "#e41a1c"}
+      # ...
+assign:                       # ordered rules, FIRST match wins
+  - {theme: frane, geometry: line, style: frana_tipo_line}
+  - {theme: [frane, aree, dgpv], geometry: polygon, style: frana_tipo_poly}
+  - {name_contains: idraulica, style: pericolosita_idraulica}  # domain-agnostic
+```
+
+An `assign` rule matches a layer when **all** its conditions hold:
+`theme` / `geometry` / `region` (from the layer-name parser) and/or
+`name_contains` / `name_matches` (substring / regex — the domain-agnostic escape
+hatch). To restyle for another domain, edit `data/styles.yml` and run
+`make styles`.
+
+## 7. Tests
 
 ```bash
 pytest                                  # unit + behavioural (no GeoServer needed)

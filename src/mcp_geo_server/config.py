@@ -118,7 +118,8 @@ def _load() -> Settings:
         webui_port=_as_int(os.environ.get("WEBUI_PORT"), 8000),
         llm_provider=(os.environ.get("GEO_LLM_PROVIDER") or "ollama").strip().lower(),
         ollama_host=(os.environ.get("OLLAMA_HOST") or "http://localhost:11434").strip(),
-        ollama_model=(os.environ.get("OLLAMA_MODEL") or "qwen2.5").strip(),
+        ollama_model=(os.environ.get("OLLAMA_LLM_MODEL")
+                      or os.environ.get("OLLAMA_MODEL") or "qwen2.5").strip(),
         ollama_cloud_host=(os.environ.get("OLLAMA_CLOUD_HOST") or "https://ollama.com").strip(),
         ollama_api_key=(os.environ.get("OLLAMA_API_KEY") or "").strip(),
         anthropic_api_key=(os.environ.get("ANTHROPIC_API_KEY") or "").strip(),

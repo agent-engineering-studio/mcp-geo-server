@@ -18,6 +18,7 @@ dependencies = [
     "starlette>=0.37",
     "uvicorn>=0.29",
     "anyio>=4.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -37,7 +38,7 @@ mcp-geo-server = "mcp_geo_server.server:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-mcp_geo_server = ["templates/*.j2"]
+mcp_geo_server = ["templates/*.j2", "styles_default.yml"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

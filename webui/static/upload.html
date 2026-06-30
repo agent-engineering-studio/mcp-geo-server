@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>mcp-geo-server — carica shapefile</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: system-ui, sans-serif; background: #f7f8fa; color: #222; }
+    .wrap { max-width: 640px; margin: 40px auto; background: #fff; border: 1px solid #e3e3e3;
+      border-radius: 10px; padding: 24px; box-shadow: 0 1px 6px rgba(0,0,0,0.06); }
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+    h1 { font-size: 20px; margin: 0; }
+    a.back { font-size: 14px; color: #2563eb; text-decoration: none; }
+    p.desc { color: #666; font-size: 14px; margin-top: 4px; }
+    label { display: block; font-size: 13px; color: #444; margin-top: 16px; font-weight: 600; }
+    input[type=text], input[type=file] { width: 100%; padding: 9px; font-size: 14px;
+      border: 1px solid #ccc; border-radius: 8px; margin-top: 6px; }
+    .dropzone { margin-top: 6px; border: 2px dashed #cbd5e1; border-radius: 10px; padding: 24px;
+      text-align: center; color: #888; background: #fafbfc; }
+    .dropzone.drag { border-color: #2563eb; background: #eff4ff; color: #2563eb; }
+    button { margin-top: 20px; padding: 11px 20px; border: 0; border-radius: 8px;
+      background: #2563eb; color: #fff; font-size: 15px; cursor: pointer; }
+    button:disabled { background: #9bb4ef; cursor: default; }
+    #out { margin-top: 18px; padding: 12px; border-radius: 8px; font-size: 14px; display: none; }
+    #out.ok { background: #dcfce7; color: #166534; }
+    #out.bad { background: #fee2e2; color: #991b1b; }
+    #out code { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 4px; }
+    .filename { margin-top: 8px; font-size: 13px; color: #333; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>⬆️ Carica shapefile</h1>
+      <a class="back" href="/">← Torna alla mappa</a>
+    </header>
+    <p class="desc">Carica un archivio <b>.zip</b> contenente lo shapefile
+      (<code>.shp</code>, <code>.shx</code>, <code>.dbf</code> e idealmente
+      <code>.prj</code>). Verrà importato in PostGIS e pubblicato come layer.</p>
+
+    <label>Archivio .zip</label>
+    <div class="dropzone" id="drop">Trascina qui il file .zip oppure clicca per selezionarlo
+      <div class="filename" id="fname"></div>
+    </div>
+    <input id="file" type="file" accept=".zip" style="display:none" />
+
+    <label>Nome layer (opzionale)</label>
+    <input id="name" type="text" placeholder="ricavato dal nome file se vuoto" />
+
+    <button id="btn" onclick="upload()">Carica e pubblica</button>
+    <div id="out"></div>
+  </div>
+
+  <script>
+    const fileEl = document.getElementById("file");
+    const drop = document.getElementById("drop");
+    const fname = document.getElementById("fname");
+
+    drop.onclick = () => fileEl.click();
+    fileEl.onchange = () => { fname.textContent = fileEl.files[0] ? fileEl.files[0].name : ""; };
+    ["dragover", "dragenter"].forEach(ev => drop.addEventListener(ev, e => {
+      e.preventDefault(); drop.classList.add("drag");
+    }));
+    ["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => {
+      e.preventDefault(); drop.classList.remove("drag");
+    }));
+    drop.addEventListener("drop", e => {
+      if (e.dataTransfer.files.length) {
+        fileEl.files = e.dataTransfer.files;
+        fname.textContent = fileEl.files[0].name;
+      }
+    });
+
+    async function upload() {
+      const out = document.getElementById("out");
+      const btn = document.getElementById("btn");
+      if (!fileEl.files.length) { out.style.display = "block"; out.className = "bad"; out.textContent = "Seleziona un file .zip"; return; }
+      const fd = new FormData();
+      fd.append("file", fileEl.files[0]);
+      const name = document.getElementById("name").value.trim();
+      if (name) fd.append("name", name);
+      btn.disabled = true;
+      out.style.display = "block"; out.className = ""; out.textContent = "Caricamento in corso (ogr2ogr + pubblicazione)…";
+      try {
+        const res = await fetch("/api/upload", { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || "errore");
+        out.className = "ok";
+        out.innerHTML = `Pubblicato come <code>${data.qualified}</code>.<br>` +
+          `Vai alla mappa e chiedi: «mostrami <code>${data.layer}</code>».`;
+      } catch (e) {
+        out.className = "bad";
+        out.textContent = "Errore: " + e.message;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+  </script>
+</body>
+</html>

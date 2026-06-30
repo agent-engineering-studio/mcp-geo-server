@@ -2,7 +2,9 @@ name: mcp-geo-server
 
 services:
   postgis:
-    image: postgis/postgis:16-3.4
+    # Multi-arch by default (imresamu publishes amd64 + arm64) so it runs native
+    # on Apple Silicon. The Makefile overrides POSTGIS_IMAGE per host arch.
+    image: ${POSTGIS_IMAGE:-imresamu/postgis:16-3.4}
     container_name: mcp-geo-server-postgis
     environment:
       POSTGRES_DB: gis
@@ -19,7 +21,11 @@ services:
       retries: 10
 
   geoserver:
-    image: docker.osgeo.org/geoserver:2.28.0
+    # Default = kartoza/geoserver (multi-arch: native arm64 on Apple Silicon).
+    # The Makefile switches GEOSERVER_IMAGE + GEOSERVER_DATA_DIR per host arch
+    # (e.g. the OSGeo image on amd64). The data-dir path differs between the two
+    # distributions, so it is a variable used by BOTH the env and the mount.
+    image: ${GEOSERVER_IMAGE:-kartoza/geoserver:2.28.0}
     container_name: mcp-geo-server-geoserver
     depends_on:
       postgis:
@@ -27,27 +33,76 @@ services:
     environment:
       GEOSERVER_ADMIN_USER: admin
       GEOSERVER_ADMIN_PASSWORD: geoserver
+      GEOSERVER_DATA_DIR: ${GEOSERVER_DATA_DIR:-/opt/geoserver/data_dir}
       # Let the browser-based test UI call the OGC services directly.
       CORS_ENABLED: "true"
     ports:
       - "8080:8080"
     volumes:
-      - gsdata:/opt/geoserver_data
+      - gsdata:${GEOSERVER_DATA_DIR:-/opt/geoserver/data_dir}
 
-  # Local LLM backend for the intelligent MCP agent (no external API keys).
-  ollama:
-    image: ollama/ollama:latest
-    container_name: mcp-geo-server-ollama
-    ports:
-      - "11434:11434"
+  # NOTE: no `ollama` service — the stack always uses a HOST Ollama (reachable at
+  # host.docker.internal:11434), Ollama Cloud, or Anthropic, selected via
+  # GEO_LLM_PROVIDER. Run `ollama serve` + `ollama pull <model>` on the host.
+
+  # One-shot data initialiser: loads EVERY shapefile under ./data into PostGIS
+  # and publishes each as a GeoServer layer, then exits. Fully idempotent — it
+  # is safe to leave in the stack; re-running just skips what already exists.
+  # Toggle with GEO_INIT_ENABLE=false. Transversal: no assumption about folder
+  # names; whatever *.shp it finds, it loads.
+  geo-init:
+    build:
+      context: .
+      target: bootstrap
+    image: mcp-geo-server:bootstrap
+    container_name: mcp-geo-server-init
+    restart: "no"
+    depends_on:
+      postgis:
+        condition: service_healthy
+      geoserver:
+        condition: service_started
+    environment:
+      GEOSERVER_URL: http://geoserver:8080/geoserver
+      GEOSERVER_USER: admin
+      GEOSERVER_PASSWORD: geoserver
+      GEOSERVER_DEFAULT_SRS: EPSG:4326
+      # PostGIS connection (reachable from both this container and GeoServer).
+      POSTGIS_HOST: postgis
+      POSTGIS_PORT: "5432"
+      POSTGIS_DB: gis
+      POSTGIS_USER: gis
+      POSTGIS_PASSWORD: gis
+      # Bootstrap behaviour (all optional — sensible defaults baked in).
+      GEO_INIT_ENABLE: ${GEO_INIT_ENABLE:-true}
+      GEO_INIT_DATA_DIR: /data
+      GEO_INIT_WORKSPACE: ${GEO_INIT_WORKSPACE:-ispra}
+      GEO_INIT_DATASTORE: ${GEO_INIT_DATASTORE:-ispra_pg}
+      GEO_INIT_TARGET_SRS: ${GEO_INIT_TARGET_SRS:-EPSG:4326}
+      GEO_INIT_SOURCE_SRS: ${GEO_INIT_SOURCE_SRS:-}
+      GEO_INIT_FORCE: ${GEO_INIT_FORCE:-false}
+      GEO_INIT_SHAPE_ENCODING: ${GEO_INIT_SHAPE_ENCODING:-ISO-8859-1}
+      GEO_INIT_STYLES: ${GEO_INIT_STYLES:-true}
+      # Thematic style config, read from the mounted ./data dir. Edit
+      # data/styles.yml to restyle for any domain (falls back to the packaged
+      # ISPRA default if the file is missing).
+      GEO_STYLES_CONFIG: ${GEO_STYLES_CONFIG:-/data/styles.yml}
     volumes:
-      - ollamadata:/root/.ollama
+      - ./data:/data:ro
 
-  # Web UI (FastAPI + Leaflet). Same image as the MCP agent, default command.
+  # Web UI (FastAPI + Leaflet). Built from the `bootstrap` stage so it has GDAL
+  # (ogr2ogr) + psql for shapefile upload/ingestion, and reaches the LLM for the
+  # natural-language "show me ..." command (POST /api/ask).
   webui:
-    build: .
-    image: mcp-geo-server:latest
+    build:
+      context: .
+      target: bootstrap
+    image: mcp-geo-server:bootstrap
     container_name: mcp-geo-server-webui
+    # Override the bootstrap stage CMD: serve the FastAPI UI instead.
+    # NOTE: $$ escapes compose interpolation so the CONTAINER shell expands
+    # WEBUI_PORT at runtime (not docker compose at parse time).
+    command: ["sh", "-c", "uvicorn webui.app:app --host 0.0.0.0 --port $${WEBUI_PORT}"]
     depends_on:
       geoserver:
         condition: service_started
@@ -58,6 +113,24 @@ services:
       GEOSERVER_DEFAULT_SRS: EPSG:4326
       WEBUI_PORT: "8000"
       GEO_MAP_OUTPUT_DIR: /app/maps
+      # PostGIS target for UI shapefile uploads (own workspace/datastore).
+      POSTGIS_HOST: postgis
+      POSTGIS_PORT: "5432"
+      POSTGIS_DB: gis
+      POSTGIS_USER: gis
+      POSTGIS_PASSWORD: gis
+      GEO_UPLOAD_WORKSPACE: ${GEO_UPLOAD_WORKSPACE:-uploads}
+      GEO_UPLOAD_DATASTORE: ${GEO_UPLOAD_DATASTORE:-uploads_pg}
+      # LLM backend for the natural-language command (same knobs as the mcp svc).
+      GEO_LLM_PROVIDER: ${GEO_LLM_PROVIDER:-ollama}
+      # Containers always reach the HOST Ollama via host.docker.internal — the
+      # OLLAMA_HOST in your .env.local (often localhost) is for host-side runs.
+      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-${OLLAMA_MODEL:-qwen2.5}}
+      OLLAMA_CLOUD_HOST: ${OLLAMA_CLOUD_HOST:-https://ollama.com}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
     ports:
       - "8000:8000"
 
@@ -68,20 +141,22 @@ services:
     image: mcp-geo-server:latest
     container_name: mcp-geo-server-mcp
     command: ["python", "-m", "mcp_geo_server.server"]
+    # Only GeoServer is a hard dependency. The LLM backend (host Ollama, Ollama
+    # Cloud or Anthropic) is reached lazily over the network via GEO_LLM_PROVIDER,
+    # so it must not gate startup.
     depends_on:
       geoserver:
-        condition: service_started
-      ollama:
         condition: service_started
     environment:
       GEOSERVER_URL: http://geoserver:8080/geoserver
       GEOSERVER_USER: admin
       GEOSERVER_PASSWORD: geoserver
       GEOSERVER_DEFAULT_SRS: EPSG:4326
-      # LLM provider: ollama (local, default) | ollama-cloud | anthropic
+      # LLM provider: ollama (host, default) | ollama-cloud | anthropic
       GEO_LLM_PROVIDER: ${GEO_LLM_PROVIDER:-ollama}
-      OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5}
+      # Containers reach the HOST Ollama via host.docker.internal (see webui).
+      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-${OLLAMA_MODEL:-qwen2.5}}
       OLLAMA_CLOUD_HOST: ${OLLAMA_CLOUD_HOST:-https://ollama.com}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -104,4 +179,3 @@ services:
 volumes:
   pgdata:
   gsdata:
-  ollamadata:

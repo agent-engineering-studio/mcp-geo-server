@@ -3,9 +3,12 @@
 __pycache__/
 *.pyc
 .env
+.env.local
+.DS_Store
 maps/
 _test_maps/
 .pytest_cache/
 *.egg-info/
 build/
 dist/
+data/

@@ -1,0 +1,104 @@
+# ============================================================================
+#  Thematic style configuration (default = ISPRA landslide/hazard domain).
+#
+#  This file drives src/mcp_geo_server/styling.py. To use the stack in a
+#  DIFFERENT domain, copy it, edit the `styles` + `assign` sections, and point
+#  GEO_STYLES_CONFIG at your file (mount it into the geo-init container).
+#
+#  styles:  name -> style definition
+#    kind: polygon | line | point | flat | outline
+#    attribute + classes  -> categorical thematic style (one rule per class)
+#    (flat = single fill; outline = boundary stroke only)
+#  assign:  ordered rules, FIRST match wins. A rule matches a layer when ALL of
+#    its conditions hold. Conditions (any combination):
+#      theme:         parsed theme (string or list)      e.g. [frane, aree, dgpv]
+#      geometry:      polygon | line | point
+#      region:        parsed region token
+#      name_contains: case-insensitive substring of the layer name
+#      name_matches:  regex tested against the layer name
+#    The theme/geometry/region come from the name parser; name_contains /
+#    name_matches are the domain-agnostic escape hatch.
+# ============================================================================
+
+styles:
+  frana_tipo_poly:
+    kind: polygon
+    attribute: tipo_movim
+    stroke: true
+    else_color: "#cccccc"
+    classes:
+      - {value: "0",  label: "Non determinato",                      color: "#999999"}
+      - {value: "1",  label: "Crollo / Ribaltamento",               color: "#e41a1c"}
+      - {value: "2",  label: "Scivolamento rotazionale/traslativo", color: "#377eb8"}
+      - {value: "3",  label: "Espansione",                          color: "#4daf4a"}
+      - {value: "4",  label: "Colamento lento",                     color: "#984ea3"}
+      - {value: "5",  label: "Colamento rapido",                    color: "#ff7f00"}
+      - {value: "6",  label: "Sprofondamento",                      color: "#a65628"}
+      - {value: "7",  label: "Complesso",                           color: "#f781bf"}
+      - {value: "9",  label: "Aree con crolli/ribaltamenti diffusi", color: "#66c2a5"}
+      - {value: "11", label: "Aree con frane superficiali diffuse",  color: "#fc8d62"}
+
+  frana_tipo_line:
+    kind: line
+    attribute: tipo_movim
+    else_color: "#cccccc"
+    classes:
+      - {value: "0",  label: "Non determinato",                      color: "#999999"}
+      - {value: "1",  label: "Crollo / Ribaltamento",               color: "#e41a1c"}
+      - {value: "2",  label: "Scivolamento rotazionale/traslativo", color: "#377eb8"}
+      - {value: "3",  label: "Espansione",                          color: "#4daf4a"}
+      - {value: "4",  label: "Colamento lento",                     color: "#984ea3"}
+      - {value: "5",  label: "Colamento rapido",                    color: "#ff7f00"}
+      - {value: "6",  label: "Sprofondamento",                      color: "#a65628"}
+      - {value: "7",  label: "Complesso",                           color: "#f781bf"}
+      - {value: "9",  label: "Aree con crolli/ribaltamenti diffusi", color: "#66c2a5"}
+      - {value: "11", label: "Aree con frane superficiali diffuse",  color: "#fc8d62"}
+
+  frana_tipo_point:
+    kind: point
+    attribute: tipo_movim
+    else_color: "#cccccc"
+    classes:
+      - {value: "0",  label: "Non determinato",                      color: "#999999"}
+      - {value: "1",  label: "Crollo / Ribaltamento",               color: "#e41a1c"}
+      - {value: "2",  label: "Scivolamento rotazionale/traslativo", color: "#377eb8"}
+      - {value: "3",  label: "Espansione",                          color: "#4daf4a"}
+      - {value: "4",  label: "Colamento lento",                     color: "#984ea3"}
+      - {value: "5",  label: "Colamento rapido",                    color: "#ff7f00"}
+      - {value: "6",  label: "Sprofondamento",                      color: "#a65628"}
+      - {value: "7",  label: "Complesso",                           color: "#f781bf"}
+      - {value: "9",  label: "Aree con crolli/ribaltamenti diffusi", color: "#66c2a5"}
+      - {value: "11", label: "Aree con frane superficiali diffuse",  color: "#fc8d62"}
+
+  pericolosita_pai:
+    kind: polygon
+    attribute: per_fr_ita
+    # No stroke: the PAI mosaic has ~900k tiny polygons; piled-up outlines
+    # would darken the map at small scales.
+    stroke: false
+    else_color: "#cccccc"
+    classes:
+      - {value: "Aree di Attenzione AA", label: "Aree di Attenzione (AA)", color: "#bdbdbd"}
+      - {value: "Moderata P1",           label: "Moderata (P1)",           color: "#ffffb2"}
+      - {value: "Media P2",              label: "Media (P2)",              color: "#fecc5c"}
+      - {value: "Elevata P3",            label: "Elevata (P3)",            color: "#fd8d3c"}
+      - {value: "Molto elevata P4",      label: "Molto elevata (P4)",      color: "#e31a1c"}
+
+  pericolosita_idraulica:
+    kind: flat
+    color: "#3182bd"
+    opacity: 0.5
+    title: "Pericolosità idraulica"
+
+  limiti_outline:
+    kind: outline
+    color: "#444444"
+    title: "Limiti amministrativi"
+
+assign:
+  - {theme: frane, geometry: line,  style: frana_tipo_line}
+  - {theme: frane, geometry: point, style: frana_tipo_point}
+  - {theme: [frane, aree, dgpv], geometry: polygon, style: frana_tipo_poly}
+  - {theme: mosaicatura, name_contains: idraulica, style: pericolosita_idraulica}
+  - {theme: mosaicatura, style: pericolosita_pai}
+  - {theme: limiti, style: limiti_outline}
