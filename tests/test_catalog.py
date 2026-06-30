@@ -1,7 +1,5 @@
-"""Unit tests for the layer-catalog parsing + NL-selection validation.
-
-No network / no LLM: pure functions over layer names and a fake model reply.
-"""
+"""Unit tests for the domain-agnostic catalog (WMS-capabilities parsing +
+LLM-selection validation). No network / no LLM."""
 
 from __future__ import annotations
 
@@ -10,66 +8,77 @@ import pytest
 from mcp_geo_server.catalog import (
     build_catalog,
     catalog_prompt,
-    parse_layer_name,
+    parse_wms_capabilities,
     validate_selection,
 )
 
+_CAPS = """<?xml version="1.0" encoding="UTF-8"?>
+<WMS_Capabilities xmlns="http://www.opengis.net/wms">
+  <Capability>
+    <Layer>
+      <Title>GeoServer Web Map Service</Title>
+      <Layer queryable="1">
+        <Name>ispra:frane_line_molise_opendata</Name>
+        <Title>Frane lineari Molise</Title>
+        <Abstract>Inventario frane</Abstract>
+        <KeywordList><Keyword>frane</Keyword><Keyword>molise</Keyword></KeywordList>
+      </Layer>
+      <Layer queryable="1">
+        <Name>topp:states</Name>
+        <Title>USA Population</Title>
+      </Layer>
+    </Layer>
+  </Capability>
+</WMS_Capabilities>"""
 
-@pytest.mark.parametrize("name,theme,geometry,region", [
-    ("frane_line_molise_opendata", "frane", "line", "molise"),
-    ("frane_poly_campania_opendata", "frane", "polygon", "campania"),
-    ("frane_piff_molise_opendata", "frane", "point", "molise"),
-    ("dgpv_poly_valle_d_aosta_opendata", "dgpv", "polygon", "valle_d_aosta"),
-    ("aree_poly_friuli_venezia_giulia_opendata", "aree", "polygon",
-     "friuli_venezia_giulia"),
-    ("com01012023_g", "limiti", "polygon", None),
-    ("reg01012023_g", "limiti", "polygon", None),
-])
-def test_parse_layer_name(name, theme, geometry, region):
-    m = parse_layer_name(name, "ispra")
-    assert m.theme == theme
-    assert m.geometry == geometry
-    assert m.region == region
-    assert m.qualified == f"ispra:{name}"
+
+def test_parse_wms_capabilities_extracts_named_layers():
+    layers = parse_wms_capabilities(_CAPS)
+    # the container Layer (no Name) is skipped → exactly 2 named layers.
+    assert len(layers) == 2
+    first = layers[0]
+    assert first["workspace"] == "ispra"
+    assert first["name"] == "frane_line_molise_opendata"
+    assert first["title"] == "Frane lineari Molise"
+    assert first["keywords"] == ["frane", "molise"]
 
 
-def test_mosaicatura_prefix_wins_over_internal_aree_token():
-    # "aree" appears inside the name but the theme is the prefix.
-    m = parse_layer_name("mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai")
-    assert m.theme == "mosaicatura"
-    assert m.geometry == "polygon"
-    assert "frana" in m.label
+def test_parse_wms_capabilities_bad_xml_is_empty():
+    assert parse_wms_capabilities("not xml <<<") == []
+
+
+def test_catalog_prompt_includes_qualified_name_and_metadata():
+    catalog = build_catalog(parse_wms_capabilities(_CAPS))
+    prompt = catalog_prompt(catalog)
+    assert "ispra:frane_line_molise_opendata" in prompt
+    assert "Frane lineari Molise" in prompt
+    assert "topp:states" in prompt
+    assert "kw: frane, molise" in prompt
 
 
 def test_validate_selection_keeps_known_drops_hallucinated():
     catalog = build_catalog([
-        ("frane_line_molise_opendata", "ispra"),
-        ("com01012023_g", "ispra"),
+        {"name": "frane_line_molise_opendata", "workspace": "ispra"},
+        {"name": "states", "workspace": "topp"},
     ])
-    reply = ('prose... {"layers": ["ispra:frane_line_molise_opendata", '
-             '"ispra:does_not_exist", "com01012023_g"], "cql_filter": "  ", '
-             '"explanation": "ok"} trailing text')
+    reply = ('prose {"layers": ["ispra:frane_line_molise_opendata", '
+             '"ispra:nope", "states"], "cql_filter": "  ", "explanation": "ok"} x')
     sel = validate_selection(reply, catalog)
-    # qualified + bare both resolve; hallucinated dropped; blank cql -> None.
-    assert sel["layers"] == ["ispra:frane_line_molise_opendata", "ispra:com01012023_g"]
+    assert sel["layers"] == ["ispra:frane_line_molise_opendata", "topp:states"]
     assert sel["cql_filter"] is None
     assert sel["explanation"] == "ok"
 
 
-def test_validate_selection_dedupes_and_accepts_string():
-    catalog = build_catalog([("com01012023_g", "ispra")])
-    reply = '{"layers": "com01012023_g", "explanation": ""}'
+def test_validate_selection_keeps_cql_when_present():
+    catalog = build_catalog([{"name": "mosaic", "workspace": "ispra"}])
+    reply = ('{"layers": ["ispra:mosaic"], '
+             '"cql_filter": "per_fr_ita IN (\'Elevata P3\',\'Molto elevata P4\')", '
+             '"explanation": "alta pericolosità"}')
     sel = validate_selection(reply, catalog)
-    assert sel["layers"] == ["ispra:com01012023_g"]
+    assert sel["layers"] == ["ispra:mosaic"]
+    assert "per_fr_ita" in sel["cql_filter"]
 
 
 def test_validate_selection_raises_on_no_json():
     with pytest.raises(ValueError):
         validate_selection("no json here", [])
-
-
-def test_catalog_prompt_lists_qualified_names():
-    catalog = build_catalog([("frane_line_molise_opendata", "ispra")])
-    prompt = catalog_prompt(catalog)
-    assert "ispra:frane_line_molise_opendata" in prompt
-    assert "theme=frane" in prompt

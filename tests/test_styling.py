@@ -79,12 +79,17 @@ def test_build_style_rejects_categorical_without_classes():
     ("mosaicatura_ispra_2020_aree_pericolosita_idraulica", "pericolosita_idraulica"),
     ("states", None),  # unknown / default sample layer
 ])
-def test_style_for_layer(cfg, name, expected):
+def test_style_for_layer_uses_name_rules_from_config(cfg, name, expected):
+    # Matching is purely name-based (config assign rules), no hardcoded vocab.
     assert style_for_layer(name, cfg["assign"]) == expected
 
 
-def test_name_contains_escape_hatch_for_arbitrary_domains():
-    # A domain with no parser theme can still match via name_contains.
-    assign = [{"name_contains": "co2", "style": "air_quality"}]
+def test_style_for_layer_arbitrary_domain():
+    assign = [
+        {"name_contains": "co2", "style": "air_quality"},
+        {"name_matches": "^road_", "style": "roads"},
+    ]
     assert style_for_layer("sensor_co2_2024", assign) == "air_quality"
+    assert style_for_layer("road_primary", assign) == "roads"
     assert style_for_layer("sensor_pm10_2024", assign) is None
+

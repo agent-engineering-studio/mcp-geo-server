@@ -9,15 +9,12 @@
 #    kind: polygon | line | point | flat | outline
 #    attribute + classes  -> categorical thematic style (one rule per class)
 #    (flat = single fill; outline = boundary stroke only)
-#  assign:  ordered rules, FIRST match wins. A rule matches a layer when ALL of
-#    its conditions hold. Conditions (any combination):
-#      theme:         parsed theme (string or list)      e.g. [frane, aree, dgpv]
-#      geometry:      polygon | line | point
-#      region:        parsed region token
+#  assign:  ordered rules, FIRST match wins. A rule matches a layer name by:
 #      name_contains: case-insensitive substring of the layer name
 #      name_matches:  regex tested against the layer name
-#    The theme/geometry/region come from the name parser; name_contains /
-#    name_matches are the domain-agnostic escape hatch.
+#    Matching is purely name-based so the styling engine is domain-agnostic —
+#    these (ISPRA-specific) patterns live in the config, not in the code. For
+#    another domain, replace them with your own patterns.
 # ============================================================================
 
 styles:
@@ -96,9 +93,9 @@ styles:
     title: "Limiti amministrativi"
 
 assign:
-  - {theme: frane, geometry: line,  style: frana_tipo_line}
-  - {theme: frane, geometry: point, style: frana_tipo_point}
-  - {theme: [frane, aree, dgpv], geometry: polygon, style: frana_tipo_poly}
-  - {theme: mosaicatura, name_contains: idraulica, style: pericolosita_idraulica}
-  - {theme: mosaicatura, style: pericolosita_pai}
-  - {theme: limiti, style: limiti_outline}
+  - {name_matches: "^frane_line",            style: frana_tipo_line}
+  - {name_matches: "^frane_piff",            style: frana_tipo_point}
+  - {name_matches: "^(frane|aree|dgpv)_poly", style: frana_tipo_poly}
+  - {name_contains: idraulica,               style: pericolosita_idraulica}
+  - {name_matches: "mosaicatura.*frana",     style: pericolosita_pai}
+  - {name_matches: "^(com|provcm|reg|ripgeo)[0-9]", style: limiti_outline}

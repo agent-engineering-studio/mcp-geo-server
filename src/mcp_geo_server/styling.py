@@ -24,7 +24,6 @@ from pathlib import Path
 
 import yaml
 
-from .catalog import parse_layer_name
 from .client import GeoServerError, get_client
 from .config import get_settings
 from .formatting import extract
@@ -176,28 +175,30 @@ def build_styles(cfg: dict) -> dict[str, str]:
 # --------------------------------------------------------------------------
 # Layer -> style mapping (structured fields + name escape hatch)
 # --------------------------------------------------------------------------
-def _rule_matches(rule: dict, meta, name: str) -> bool:
-    if "theme" in rule:
-        themes = rule["theme"] if isinstance(rule["theme"], list) else [rule["theme"]]
-        if meta.theme not in themes:
+def _rule_matches(rule: dict, name: str) -> bool:
+    """A rule matches when ALL of its name conditions hold (domain-agnostic)."""
+    matched_any = False
+    if "name_contains" in rule:
+        matched_any = True
+        if str(rule["name_contains"]).lower() not in name.lower():
             return False
-    if "geometry" in rule and meta.geometry != rule["geometry"]:
-        return False
-    if "region" in rule and meta.region != rule["region"]:
-        return False
-    if "name_contains" in rule and \
-            str(rule["name_contains"]).lower() not in name.lower():
-        return False
-    if "name_matches" in rule and not re.search(rule["name_matches"], name):
-        return False
-    return True
+    if "name_matches" in rule:
+        matched_any = True
+        if not re.search(rule["name_matches"], name):
+            return False
+    # A rule with no condition never matches (avoid styling everything).
+    return matched_any
 
 
 def style_for_layer(name: str, assign: list[dict]) -> str | None:
-    """First assignment rule whose conditions all match, else None."""
-    meta = parse_layer_name(name)
+    """First assignment rule whose name conditions match, else None.
+
+    Matching is purely name-based (``name_contains`` / ``name_matches``) so the
+    engine stays independent of any naming convention — the rules live in the
+    config.
+    """
     for rule in assign:
-        if _rule_matches(rule, meta, name):
+        if _rule_matches(rule, name):
             return rule.get("style")
     return None
 

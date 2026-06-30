@@ -21,7 +21,13 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from mcp_geo_server.agent import _build_chat_client
-from mcp_geo_server.catalog import build_catalog, catalog_prompt, validate_selection
+from mcp_geo_server.catalog import (
+    build_catalog,
+    catalog_prompt,
+    parse_wms_capabilities,
+    validate_selection,
+)
+from mcp_geo_server.styling import load_config as _load_style_config
 from mcp_geo_server.client import GeoServerError, get_client
 from mcp_geo_server.config import get_settings
 from mcp_geo_server.formatting import extract
@@ -65,12 +71,14 @@ _RESOLVER_INSTRUCTIONS = (
     '{"layers": ["<exact qualified name from the catalog>", ...], '
     '"cql_filter": null, "explanation": "<one short sentence, in the user\'s '
     'language>"}\n'
-    "Rules: pick ONLY names that appear verbatim in the catalog; match the "
-    "geometry word — 'lineari/linee'->line, 'poligoni/aree/areali'->poly, "
-    "'punti'->piff; prefer the most specific layers (region + theme + geometry); "
-    "if the request is ambiguous include the few best matches; set cql_filter to "
-    "null unless the user clearly asks to filter by an attribute value; never "
-    "invent layer or column names."
+    "Rules:\n"
+    "- pick ONLY names that appear verbatim in the catalog; match the request "
+    "against each layer's name, title and keywords; prefer the most specific "
+    "layers; if ambiguous include the few best matches.\n"
+    "- cql_filter: when the user asks for a SUBSET by an attribute value (e.g. "
+    "'alta/elevata pericolosità'), build a CQL using ONLY the attributes and "
+    "EXACT values listed under 'Filterable attributes'; otherwise null. Never "
+    "invent layer, column or value names."
 )
 
 
@@ -346,24 +354,25 @@ async def upload_shapefile(file: UploadFile = File(...),
 
 # ---- layer catalog + natural-language command -----------------------------
 async def _load_catalog() -> list:
-    """Fetch all published layers and parse them into catalog metadata."""
+    """Build the catalog from the WMS capabilities (name + title + keywords).
+
+    Domain-agnostic: one GetCapabilities call gives every published layer's real
+    metadata, so the resolver matches requests semantically without any
+    hardcoded vocabulary.
+    """
     client = get_client()
-    data = await _guard(client.get_json("layers.json"))
-    pairs = []
-    for entry in extract(data, "layers", "layer"):
-        full = entry.get("name", "") if isinstance(entry, dict) else str(entry)
-        ws, _, bare = full.partition(":") if ":" in full else ("", "", full)
-        pairs.append((bare, ws))
-    return build_catalog(pairs)
+    resp = await _guard(client.ows(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"},
+        base=client.settings.wms_base))
+    return build_catalog(parse_wms_capabilities(resp.text))
 
 
 @app.get("/api/layers")
 async def list_layers() -> list:
-    """Return the parsed catalog of all published layers (for the UI picker)."""
+    """Return the catalog of all published layers (name + title + keywords)."""
     catalog = await _load_catalog()
     return [{"name": m.name, "workspace": m.workspace, "qualified": m.qualified,
-             "label": m.label, "theme": m.theme, "geometry": m.geometry,
-             "region": m.region} for m in catalog]
+             "label": m.label, "keywords": list(m.keywords)} for m in catalog]
 
 
 @app.get("/api/bbox")
@@ -379,6 +388,39 @@ class AskIn(BaseModel):
     query: str
 
 
+_FILTER_HINTS: str | None = None
+
+
+def _filter_hints() -> str:
+    """Filterable attributes + allowed values, derived from the style config.
+
+    Lets the LLM build a valid ``cql_filter`` (e.g. high hazard classes) using
+    real column names and exact values — generic, no domain hardcoding.
+    """
+    global _FILTER_HINTS
+    if _FILTER_HINTS is None:
+        attrs: dict[str, list[tuple[str, str]]] = {}
+        for spec in _load_style_config().get("styles", {}).values():
+            attr, classes = spec.get("attribute"), spec.get("classes")
+            if not (attr and classes):
+                continue
+            for c in classes:
+                pair = (str(c.get("value")), str(c.get("label", "")))
+                attrs.setdefault(attr, [])
+                if pair not in attrs[attr]:
+                    attrs[attr].append(pair)
+        if not attrs:
+            _FILTER_HINTS = ""
+        else:
+            lines = ["Filterable attributes (use EXACT values in cql_filter):"]
+            for a, pairs in attrs.items():
+                vals = ", ".join(f"'{v}' ({lbl})" if lbl else f"'{v}'"
+                                 for v, lbl in pairs)
+                lines.append(f"- {a}: {vals}")
+            _FILTER_HINTS = "\n".join(lines)
+    return _FILTER_HINTS
+
+
 @app.post("/api/ask")
 async def ask(body: AskIn) -> dict:
     """Map a natural-language request to layers via the LLM resolver.
@@ -391,7 +433,8 @@ async def ask(body: AskIn) -> dict:
         raise HTTPException(status_code=400, detail="empty query.")
 
     catalog = await _load_catalog()
-    prompt = f"{catalog_prompt(catalog)}\n\nRequest: {query}\n\nJSON:"
+    prompt = (f"{catalog_prompt(catalog)}\n\n{_filter_hints()}\n\n"
+              f"Request: {query}\n\nJSON:")
     try:
         resolver = _get_resolver()
         result = await resolver.run(prompt)
@@ -403,9 +446,8 @@ async def ask(body: AskIn) -> dict:
         raise HTTPException(status_code=502,
                             detail=f"LLM resolver failed: {exc}") from exc
 
-    # Combined bbox over the selected layers (best effort). Skip degenerate
-    # boxes (zero area) — empty layers report (0,0,0,0), which would otherwise
-    # drag the combined extent to the Gulf of Guinea.
+    # Zoom to the combined extent of the selected layers (skip degenerate boxes —
+    # empty layers report (0,0,0,0), which would drag the extent to the sea).
     boxes = []
     for qualified in selection["layers"]:
         ws, _, name = qualified.partition(":")

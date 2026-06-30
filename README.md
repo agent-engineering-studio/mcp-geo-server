@@ -199,16 +199,15 @@ styles:                       # name -> SLD definition
       - {value: "1", label: "Crollo / Ribaltamento", color: "#e41a1c"}
       # ...
 assign:                       # ordered rules, FIRST match wins
-  - {theme: frane, geometry: line, style: frana_tipo_line}
-  - {theme: [frane, aree, dgpv], geometry: polygon, style: frana_tipo_poly}
-  - {name_contains: idraulica, style: pericolosita_idraulica}  # domain-agnostic
+  - {name_matches: "^frane_line", style: frana_tipo_line}
+  - {name_matches: "^(frane|aree|dgpv)_poly", style: frana_tipo_poly}
+  - {name_contains: idraulica, style: pericolosita_idraulica}
 ```
 
-An `assign` rule matches a layer when **all** its conditions hold:
-`theme` / `geometry` / `region` (from the layer-name parser) and/or
-`name_contains` / `name_matches` (substring / regex — the domain-agnostic escape
-hatch). To restyle for another domain, edit `data/styles.yml` and run
-`make styles`.
+An `assign` rule matches a layer **by name** via `name_contains` (substring) or
+`name_matches` (regex) — purely name-based, so the styling engine carries no
+hardcoded vocabulary. The patterns are domain-specific config, not code. To
+restyle for another domain, edit `data/styles.yml` and run `make styles`.
 
 ## 7. Tests
 
