@@ -15,8 +15,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -278,14 +278,30 @@ async def build_map(layers: str, workspace: str | None = None,
     return {"saved": str(path), "layers": qlayers}
 
 
+@app.get("/wms")
+async def wms_proxy(request: Request) -> Response:
+    """Proxy WMS (GetMap/GetLegendGraphic) to GeoServer over the internal network.
+
+    The browser only ever talks to this same-origin endpoint, so it never needs
+    to reach the in-container GeoServer hostname — no host/port juggling, no
+    cross-origin issues. Query params are forwarded verbatim.
+    """
+    client = get_client()
+    upstream = await client._client.get(client.settings.wms_base,
+                                        params=dict(request.query_params))
+    return Response(content=upstream.content, status_code=upstream.status_code,
+                    media_type=upstream.headers.get("content-type",
+                                                    "application/octet-stream"))
+
+
 @app.get("/api/config")
 async def config() -> dict:
     """Expose the bits the browser needs (e.g. the WMS base URL for Leaflet)."""
     client = get_client()
     return {
-        # Browser-facing: the container hostname (geoserver:8080) is not
-        # reachable from the user's browser, so expose the public URL.
-        "wms_base": client.settings.public_wms_base,
+        # Same-origin WMS proxy (see /wms) — robust regardless of how/where
+        # GeoServer is exposed; the browser never hits the container hostname.
+        "wms_base": "/wms",
         "default_workspace": client.settings.default_workspace,
         "default_srs": client.settings.default_srs,
     }
