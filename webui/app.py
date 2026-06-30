@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import io
 import os
+import re
 import tempfile
 import zipfile
 from pathlib import Path
@@ -285,13 +286,62 @@ async def wms_proxy(request: Request) -> Response:
     The browser only ever talks to this same-origin endpoint, so it never needs
     to reach the in-container GeoServer hostname — no host/port juggling, no
     cross-origin issues. Query params are forwarded verbatim.
+
+    Retries on 429/503: a tiled Leaflet layer fires many concurrent tile
+    requests and GeoServer can transiently throttle some; a short retry makes
+    the map load reliably instead of leaving blank tiles.
     """
     client = get_client()
-    upstream = await client._client.get(client.settings.wms_base,
-                                        params=dict(request.query_params))
+    params = dict(request.query_params)
+    upstream = None
+    for attempt in range(4):
+        upstream = await client._client.get(client.settings.wms_base, params=params)
+        if upstream.status_code not in (429, 503):
+            break
+        await asyncio.sleep(0.15 * (attempt + 1))
     return Response(content=upstream.content, status_code=upstream.status_code,
                     media_type=upstream.headers.get("content-type",
                                                     "application/octet-stream"))
+
+
+_GEOM_LABEL = [("Polygon", "poligoni"), ("Line", "linee"), ("Point", "punti")]
+
+
+async def _layer_info(workspace: str, name: str) -> dict | None:
+    """Generic, domain-agnostic description of a layer's data type.
+
+    Geometry kind + attribute names (from the feature type schema) + feature
+    count (WFS hits). No assumption about the domain.
+    """
+    client = get_client()
+    try:
+        data = await client.get_json(
+            f"workspaces/{workspace}/featuretypes/{name}.json")
+    except GeoServerError:
+        return None
+    ft = data.get("featureType", {}) if isinstance(data, dict) else {}
+    atts = ft.get("attributes", {}).get("attribute", []) or []
+    geometry, fields = None, []
+    for a in atts:
+        binding = a.get("binding", "")
+        if "jts" in binding.lower() or "geom" in binding.lower():
+            geometry = next((lbl for key, lbl in _GEOM_LABEL if key in binding),
+                            "geometrie")
+        elif a.get("name"):
+            fields.append(a["name"])
+    count = None
+    try:
+        resp = await client.ows(
+            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+             "typeNames": f"{workspace}:{name}", "resultType": "hits"},
+            base=client.settings.wfs_base)
+        m = re.search(r'numberMatched="(\d+)"', resp.text)
+        if m:
+            count = int(m.group(1))
+    except (GeoServerError, ValueError):
+        pass
+    return {"geometry": geometry, "fields": fields, "count": count,
+            "title": ft.get("title") or name, "abstract": ft.get("abstract") or ""}
 
 
 @app.get("/api/config")
@@ -481,6 +531,15 @@ async def ask(body: AskIn) -> dict:
             "maxy": max(b["maxy"] for b in boxes),
         }
     selection["bbox"] = combined
+
+    # Describe the data type of each selected layer (geometry, count, fields).
+    info = []
+    for qualified in selection["layers"]:
+        ws, _, name = qualified.partition(":")
+        li = await _layer_info(ws, name)
+        if li:
+            info.append({"qualified": qualified, **li})
+    selection["info"] = info
     return selection
 
 

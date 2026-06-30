@@ -112,7 +112,10 @@
       Object.keys(wmsLayers).forEach(k => delete wmsLayers[k]);
     }
     function addWmsQualified(qualified, cql) {
-      const params = { layers: qualified, format: "image/png", transparent: true, version: "1.1.1" };
+      // Larger tiles + update-when-idle reduce the burst of concurrent tile
+      // requests (which GeoServer can transiently throttle with 429).
+      const params = { layers: qualified, format: "image/png", transparent: true,
+        version: "1.1.1", tileSize: 512, updateWhenIdle: true, crossOrigin: true };
       if (cql) params.cql_filter = cql;
       wmsLayers[qualified] = L.tileLayer.wms(CONFIG.wms_base, params).addTo(map);
     }
@@ -170,9 +173,22 @@
           r.layers.forEach(l => addWmsQualified(l, r.cql_filter));
           zoomToBbox(r.bbox);
           renderLegend();
-          const lis = r.layers.map(l => `<code>${l}</code>`).join(" ");
+          const info = {};
+          (r.info || []).forEach(i => info[i.qualified] = i);
+          const lines = r.layers.map(l => {
+            const i = info[l];
+            if (!i) return `📍 <code>${l}</code>`;
+            const bits = [];
+            if (i.geometry) bits.push(i.geometry);
+            if (i.count != null) bits.push(`${i.count} elementi`);
+            let s = `📍 <code>${l}</code> — <b>${i.geometry || "dati"}</b>` +
+              (i.count != null ? `, ${i.count} elementi` : "");
+            if (i.fields && i.fields.length)
+              s += `<br><small>attributi: ${i.fields.slice(0, 12).map(escapeHtml).join(", ")}</small>`;
+            return s;
+          }).join("<br>");
           thinking.innerHTML = (r.explanation ? escapeHtml(r.explanation) : "Ecco i dati richiesti.") +
-            `<div class="layers">📍 ${lis}${r.cql_filter ? "<br>filtro: " + escapeHtml(r.cql_filter) : ""}</div>`;
+            `<div class="layers">${lines}${r.cql_filter ? "<br>filtro: " + escapeHtml(r.cql_filter) : ""}</div>`;
         }
       } catch (e) {
         thinking.className = "msg err";
