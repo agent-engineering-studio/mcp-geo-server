@@ -175,19 +175,25 @@
           renderLegend();
           const info = {};
           (r.info || []).forEach(i => info[i.qualified] = i);
-          const lines = r.layers.map(l => {
+          // Build a fully textual, descriptive answer (no technical layer ids).
+          const sentences = r.layers.map(l => {
             const i = info[l];
-            if (!i) return `📍 <code>${l}</code>`;
-            const empty = i.count === 0;
-            let s = `📍 <code>${l}</code> — <b>${i.geometry || "dati"}</b>` +
-              (i.count != null ? `, ${i.count} elementi` : "") +
-              (empty ? ` <span style="color:#b45309">⚠️ layer vuoto — nessun dato da mostrare per quest'area</span>` : "");
+            if (!i) return "";
+            const geom = i.geometry || "dati vettoriali";
+            if (i.count === 0)
+              return `Il dato è di tipo <b>${geom}</b>, ma per quest'area non contiene elementi: non c'è nulla da mostrare sulla mappa.`;
+            let s = `Sono ${geom}`;
+            if (i.count != null) s += ` con <b>${i.count}</b> elementi`;
+            s += ".";
             if (i.fields && i.fields.length)
-              s += `<br><small>attributi: ${i.fields.slice(0, 12).map(escapeHtml).join(", ")}</small>`;
+              s += ` Per ogni elemento sono disponibili gli attributi: ${i.fields.slice(0, 10).map(escapeHtml).join(", ")}.`;
             return s;
-          }).join("<br>");
-          thinking.innerHTML = (r.explanation ? escapeHtml(r.explanation) : "Ecco i dati richiesti.") +
-            `<div class="layers">${lines}${r.cql_filter ? "<br>filtro: " + escapeHtml(r.cql_filter) : ""}</div>`;
+          }).filter(Boolean);
+          let html = escapeHtml(r.explanation || "Ecco i dati richiesti.");
+          if (sentences.length) html += `<div class="layers">${sentences.join("<br>")}</div>`;
+          if (r.cql_filter) html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
+          thinking.innerHTML = html;
+          thinking.title = r.layers.join(", ");  // technical names on hover only
         }
       } catch (e) {
         thinking.className = "msg err";
