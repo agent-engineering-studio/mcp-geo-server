@@ -178,11 +178,10 @@
           const lines = r.layers.map(l => {
             const i = info[l];
             if (!i) return `📍 <code>${l}</code>`;
-            const bits = [];
-            if (i.geometry) bits.push(i.geometry);
-            if (i.count != null) bits.push(`${i.count} elementi`);
+            const empty = i.count === 0;
             let s = `📍 <code>${l}</code> — <b>${i.geometry || "dati"}</b>` +
-              (i.count != null ? `, ${i.count} elementi` : "");
+              (i.count != null ? `, ${i.count} elementi` : "") +
+              (empty ? ` <span style="color:#b45309">⚠️ layer vuoto — nessun dato da mostrare per quest'area</span>` : "");
             if (i.fields && i.fields.length)
               s += `<br><small>attributi: ${i.fields.slice(0, 12).map(escapeHtml).join(", ")}</small>`;
             return s;
