@@ -37,6 +37,7 @@ class Settings:
     """Immutable view of the GeoServer / web-UI configuration."""
 
     url: str
+    public_url: str          # browser-facing GeoServer URL (for WMS/legend in the UI)
     user: str
     password: str
     default_workspace: str | None
@@ -80,6 +81,12 @@ class Settings:
         """Base URL of the WFS endpoint."""
         return f"{self.url}/wfs"
 
+    @property
+    def public_wms_base(self) -> str:
+        """Browser-facing WMS endpoint (the in-container hostname is not
+        reachable from the user's browser, so the UI uses this)."""
+        return f"{self.public_url}/wms"
+
 
 def _load() -> Settings:
     url = (os.environ.get("GEOSERVER_URL") or "").strip().rstrip("/")
@@ -103,9 +110,14 @@ def _load() -> Settings:
         )
 
     default_ws = (os.environ.get("GEOSERVER_DEFAULT_WORKSPACE") or "").strip() or None
+    # Browser-facing URL: defaults to the server-side url, override in Docker
+    # where the in-container hostname (geoserver:8080) is not reachable from the
+    # user's browser (set GEOSERVER_PUBLIC_URL=http://localhost:8080/geoserver).
+    public_url = (os.environ.get("GEOSERVER_PUBLIC_URL") or url).strip().rstrip("/")
 
     return Settings(
         url=url,
+        public_url=public_url,
         user=user,
         password=password,
         default_workspace=default_ws,
@@ -118,7 +130,8 @@ def _load() -> Settings:
         webui_port=_as_int(os.environ.get("WEBUI_PORT"), 8000),
         llm_provider=(os.environ.get("GEO_LLM_PROVIDER") or "ollama").strip().lower(),
         ollama_host=(os.environ.get("OLLAMA_HOST") or "http://localhost:11434").strip(),
-        ollama_model=(os.environ.get("OLLAMA_MODEL") or "qwen2.5").strip(),
+        ollama_model=(os.environ.get("OLLAMA_LLM_MODEL")
+                      or os.environ.get("OLLAMA_MODEL") or "qwen2.5").strip(),
         ollama_cloud_host=(os.environ.get("OLLAMA_CLOUD_HOST") or "https://ollama.com").strip(),
         ollama_api_key=(os.environ.get("OLLAMA_API_KEY") or "").strip(),
         anthropic_api_key=(os.environ.get("ANTHROPIC_API_KEY") or "").strip(),

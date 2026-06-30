@@ -28,9 +28,32 @@ IMAGE       ?= mcp-geo-server:latest
 # Ollama model used by the intelligent MCP agent.
 OLLAMA_MODEL ?= qwen2.5
 
-# Load variables from .env (if present) so `make run` / `make webui` pick them up.
+# ---- platform switch: pick native base images per host architecture ---------
+# Apple Silicon / arm64 -> multi-arch community images (no QEMU emulation).
+# Intel / amd64          -> the canonical upstream images.
+# The GeoServer data-dir path differs between the two GeoServer distributions,
+# so it travels alongside the image choice.
+ARCH := $(shell uname -m)
+ifeq ($(filter $(ARCH),arm64 aarch64),$(ARCH))
+  POSTGIS_IMAGE      ?= imresamu/postgis:16-3.4
+  GEOSERVER_IMAGE    ?= kartoza/geoserver:2.28.0
+  GEOSERVER_DATA_DIR ?= /opt/geoserver/data_dir
+else
+  POSTGIS_IMAGE      ?= postgis/postgis:16-3.4
+  GEOSERVER_IMAGE    ?= docker.osgeo.org/geoserver:2.28.0
+  GEOSERVER_DATA_DIR ?= /opt/geoserver_data
+endif
+export POSTGIS_IMAGE GEOSERVER_IMAGE GEOSERVER_DATA_DIR
+
+# Load variables from .env then .env.local (local overrides) so both `make run`
+# and `docker compose` interpolation pick them up. .env.local is the per-machine
+# config (e.g. OLLAMA_LLM_MODEL, API keys) and is gitignored.
 ifneq (,$(wildcard .env))
 include .env
+export
+endif
+ifneq (,$(wildcard .env.local))
+include .env.local
 export
 endif
 
@@ -152,21 +175,82 @@ map: install ## Generate a demo Leaflet map into $(GEO_MAP_OUTPUT_DIR)
 #  Docker stack (GeoServer + PostGIS)
 # ============================================================================
 .PHONY: docker-up
-docker-up: ## Start the whole stack (GeoServer + PostGIS + Ollama + web UI + MCP) in the background
+docker-up: ## Start the whole stack (GeoServer + PostGIS + web UI + MCP) against HOST Ollama
+	@if [ "$(GEO_LLM_PROVIDER)" = "ollama" ] || [ -z "$(GEO_LLM_PROVIDER)" ]; then \
+		if ! curl -fsS http://localhost:11434/api/tags >/dev/null 2>&1; then \
+			echo "⚠️  Host Ollama not reachable at http://localhost:11434 — start it with: ollama serve &"; \
+			echo "    (or use 'make up-ollama-cloud' / 'make up-claude')"; \
+			exit 1; \
+		fi; \
+		echo "✅ Host Ollama reachable."; \
+	fi
 	docker compose up -d
 	@echo
-	@echo ">> Stack started:"
+	@echo ">> Stack started ($(ARCH) images: $(GEOSERVER_IMAGE), $(POSTGIS_IMAGE)):"
 	@echo "   Web UI     -> http://localhost:$(WEBUI_PORT)        (service 'webui')"
 	@echo "   MCP server -> http://localhost:9000/mcp        (service 'mcp', streamable-HTTP)"
 	@echo "   GeoServer  -> http://localhost:8080/geoserver  (admin/geoserver)"
-	@echo "   Ollama     -> http://localhost:11434           (run 'make ollama-pull' first)"
 	@echo "   PostGIS    -> localhost:5432                   (gis/gis)"
 	@echo
-	@echo "   NOTE: the MCP agent needs the model pulled once -> make ollama-pull"
+	@echo "   LLM: HOST Ollama (run 'make ollama-pull' once for the model)."
 
 .PHONY: docker-down
 docker-down: ## Stop the Docker stack (keep volumes)
 	docker compose down
+
+.PHONY: init
+init: ## (Re)run the data bootstrap: load every shapefile in ./data into PostGIS + publish
+	docker compose run --rm --build geo-init
+
+.PHONY: init-force
+init-force: ## Like 'init' but drop & reload tables that already exist (DESTRUCTIVE to loaded data)
+	GEO_INIT_FORCE=true docker compose run --rm --build geo-init
+
+.PHONY: init-logs
+init-logs: ## Show the data-bootstrap (geo-init) logs
+	docker compose logs geo-init
+
+.PHONY: styles
+styles: ## (Re)apply the thematic SLD styles to the published layers
+	docker compose run --rm --build geo-init python -m mcp_geo_server.styling
+
+# Short aliases so `make up` / `make down` work as expected.
+.PHONY: up
+up: docker-up ## Alias for docker-up
+
+.PHONY: down
+down: docker-down ## Alias for docker-down
+
+.PHONY: ps
+ps: docker-ps ## Alias for docker-ps
+
+.PHONY: logs
+logs: ## Tail logs for ALL services (incl. webui + mcp)
+	docker compose logs -f
+
+# ---- LLM provider variants (pick where the agent's model runs) -------------
+# `make up` uses HOST Ollama (no Ollama container in the stack). The targets
+# below switch provider to a hosted/cloud LLM instead.
+.PHONY: up-host-ollama
+up-host-ollama: docker-up ## Alias for 'make up' (stack always uses host Ollama by default)
+
+.PHONY: up-ollama-cloud
+up-ollama-cloud: ## Start the stack with GEO_LLM_PROVIDER=ollama-cloud (hosted, no Ollama container). Requires OLLAMA_API_KEY in .env.
+	@if [ ! -f .env ] || ! grep -qE '^OLLAMA_API_KEY=.+' .env; then \
+		echo "⚠️  OLLAMA_API_KEY not set in .env — the ollama-cloud provider needs it (run 'make env' first)."; \
+		exit 1; \
+	fi
+	@echo "✅ Using Ollama Cloud as LLM provider (no Docker Ollama)…"
+	GEO_LLM_PROVIDER=ollama-cloud docker compose up -d
+
+.PHONY: up-claude
+up-claude: ## Start the stack with GEO_LLM_PROVIDER=anthropic (Claude, no Ollama container). Requires ANTHROPIC_API_KEY in .env.
+	@if [ ! -f .env ] || ! grep -qE '^ANTHROPIC_API_KEY=.+' .env; then \
+		echo "⚠️  ANTHROPIC_API_KEY not set in .env — the anthropic provider needs it (run 'make env' first)."; \
+		exit 1; \
+	fi
+	@echo "✅ Using Claude (Anthropic) as LLM provider (no Docker Ollama)…"
+	GEO_LLM_PROVIDER=anthropic docker compose up -d
 
 .PHONY: docker-clean
 docker-clean: ## Stop the Docker stack and delete its volumes (DESTRUCTIVE)
@@ -181,9 +265,9 @@ mcp-logs: ## Tail the MCP agent logs
 	docker compose logs -f mcp
 
 .PHONY: ollama-pull
-ollama-pull: ## Pull the LLM model into the Ollama container ($(OLLAMA_MODEL))
-	docker compose up -d ollama
-	docker compose exec ollama ollama pull $(OLLAMA_MODEL)
+ollama-pull: ## Pull the LLM model into the HOST Ollama ($(OLLAMA_MODEL))
+	@command -v ollama >/dev/null 2>&1 || { echo "⚠️  'ollama' not found on host — install it from https://ollama.com"; exit 1; }
+	ollama pull $(OLLAMA_MODEL)
 
 .PHONY: docker-ps
 docker-ps: ## Show the status of the Docker services
@@ -203,15 +287,15 @@ stack-test: docker-up wait-geoserver test-integration ## Bring up Docker, wait, 
 #  Application image (this project's MCP server + web UI)
 # ----------------------------------------------------------------------------
 .PHONY: build
-build: ## Build ALL images: build the app and pull GeoServer/PostGIS/Ollama
+build: ## Build the app image + pull the GeoServer/PostGIS base images (per host arch)
 	@echo ">> Building application image (mcp-geo-server: webui + mcp agent)..."
 	docker compose build
-	@echo ">> Pulling base images (GeoServer + PostGIS + Ollama)..."
-	docker compose pull postgis geoserver ollama
+	@echo ">> Pulling base images for $(ARCH): $(GEOSERVER_IMAGE) + $(POSTGIS_IMAGE)..."
+	docker compose pull postgis geoserver
 	@echo
 	@echo ">> All images ready:"
 	@docker images --format 'table {{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' \
-		| grep -E 'REPOSITORY|mcp-geo-server|postgis/postgis|osgeo.org/geoserver|ollama/ollama'
+		| grep -E 'REPOSITORY|mcp-geo-server|postgis|geoserver'
 
 .PHONY: build-app
 build-app: ## Build only the application image via compose

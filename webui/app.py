@@ -7,16 +7,40 @@ operation and returns JSON.
 
 from __future__ import annotations
 
+import asyncio
+import io
+import os
+import re
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from mcp_geo_server.agent import _build_chat_client
+from mcp_geo_server.catalog import (
+    build_catalog,
+    catalog_prompt,
+    parse_wms_capabilities,
+    validate_selection,
+)
+from mcp_geo_server.styling import load_config as _load_style_config
 from mcp_geo_server.client import GeoServerError, get_client
+from mcp_geo_server.config import get_settings
 from mcp_geo_server.formatting import extract
+from mcp_geo_server.ingest import (
+    PgConn,
+    ensure_datastore,
+    ensure_workspace,
+    featuretype_bbox,
+    load_shapefile,
+    publish,
+    sanitize,
+)
 from mcp_geo_server.tools.datastores import _connection_parameters
 from mcp_geo_server.tools.ogc import qualified_name, wfs_getfeature_params
 from mcp_geo_server.tools.styles import SLD_CONTENT_TYPE, styles_path
@@ -24,7 +48,48 @@ from mcp_geo_server.tools.map import render_map, _bounds_from_bbox
 
 _STATIC = Path(__file__).resolve().parent / "static"
 
+# Target for UI shapefile uploads (own workspace/datastore, separate from the
+# curated `ispra` data).
+_UPLOAD_WS = (os.environ.get("GEO_UPLOAD_WORKSPACE") or "uploads").strip()
+_UPLOAD_DS = (os.environ.get("GEO_UPLOAD_DATASTORE") or "uploads_pg").strip()
+_UPLOAD_PG = PgConn(
+    host=(os.environ.get("POSTGIS_HOST") or "postgis").strip(),
+    port=int(os.environ.get("POSTGIS_PORT") or 5432),
+    database=(os.environ.get("POSTGIS_DB") or "gis").strip(),
+    user=(os.environ.get("POSTGIS_USER") or "gis").strip(),
+    password=(os.environ.get("POSTGIS_PASSWORD") or "gis").strip(),
+    schema=(os.environ.get("POSTGIS_SCHEMA") or "public").strip(),
+)
+
 app = FastAPI(title="mcp-geo-server test UI")
+
+# Lazily-built LLM resolver (no GeoServer tools — it only maps NL -> layer names).
+_RESOLVER = None
+_RESOLVER_INSTRUCTIONS = (
+    "You map an Italian (or English) natural-language map request to GeoServer "
+    "layers chosen from a catalog the user gives you. Reply with ONLY a single "
+    "JSON object, no prose, no code fences:\n"
+    '{"layers": ["<exact qualified name from the catalog>", ...], '
+    '"cql_filter": null, "explanation": "<one short sentence, in the user\'s '
+    'language>"}\n'
+    "Rules:\n"
+    "- pick ONLY names that appear verbatim in the catalog; match the request "
+    "against each layer's name, title and keywords; prefer the most specific "
+    "layers; if ambiguous include the few best matches.\n"
+    "- cql_filter: when the user asks for a SUBSET by an attribute value (e.g. "
+    "'alta/elevata pericolosità'), build a CQL using ONLY the attributes and "
+    "EXACT values listed under 'Filterable attributes'; otherwise null. Never "
+    "invent layer, column or value names."
+)
+
+
+def _get_resolver():
+    global _RESOLVER
+    if _RESOLVER is None:
+        client = _build_chat_client(get_settings())
+        _RESOLVER = client.as_agent(name="layer-resolver",
+                                    instructions=_RESOLVER_INSTRUCTIONS, tools=[])
+    return _RESOLVER
 
 
 async def _guard(coro: Any) -> Any:
@@ -205,8 +270,8 @@ async def build_map(layers: str, workspace: str | None = None,
             bounds = _bounds_from_bbox(ft.get("latLonBoundingBox"))
         except GeoServerError:
             bounds = None
-    html = render_map(title=title, wms_base=client.settings.wms_base, layers=qlayers,
-                      bounds=bounds)
+    html = render_map(title=title, wms_base=client.settings.public_wms_base,
+                      layers=qlayers, bounds=bounds)
     out_dir = Path(client.settings.map_output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "webui_map.html"
@@ -214,20 +279,279 @@ async def build_map(layers: str, workspace: str | None = None,
     return {"saved": str(path), "layers": qlayers}
 
 
+@app.get("/wms")
+async def wms_proxy(request: Request) -> Response:
+    """Proxy WMS (GetMap/GetLegendGraphic) to GeoServer over the internal network.
+
+    The browser only ever talks to this same-origin endpoint, so it never needs
+    to reach the in-container GeoServer hostname — no host/port juggling, no
+    cross-origin issues. Query params are forwarded verbatim.
+
+    Retries on 429/503: a tiled Leaflet layer fires many concurrent tile
+    requests and GeoServer can transiently throttle some; a short retry makes
+    the map load reliably instead of leaving blank tiles.
+    """
+    client = get_client()
+    params = dict(request.query_params)
+    upstream = None
+    for attempt in range(4):
+        upstream = await client._client.get(client.settings.wms_base, params=params)
+        if upstream.status_code not in (429, 503):
+            break
+        await asyncio.sleep(0.15 * (attempt + 1))
+    return Response(content=upstream.content, status_code=upstream.status_code,
+                    media_type=upstream.headers.get("content-type",
+                                                    "application/octet-stream"))
+
+
+_GEOM_LABEL = [("Polygon", "poligoni"), ("Line", "linee"), ("Point", "punti")]
+
+
+async def _layer_info(workspace: str, name: str) -> dict | None:
+    """Generic, domain-agnostic description of a layer's data type.
+
+    Geometry kind + attribute names (from the feature type schema) + feature
+    count (WFS hits). No assumption about the domain.
+    """
+    client = get_client()
+    try:
+        data = await client.get_json(
+            f"workspaces/{workspace}/featuretypes/{name}.json")
+    except GeoServerError:
+        return None
+    ft = data.get("featureType", {}) if isinstance(data, dict) else {}
+    atts = ft.get("attributes", {}).get("attribute", []) or []
+    geometry, fields = None, []
+    for a in atts:
+        binding = a.get("binding", "")
+        if "jts" in binding.lower() or "geom" in binding.lower():
+            geometry = next((lbl for key, lbl in _GEOM_LABEL if key in binding),
+                            "geometrie")
+        elif a.get("name"):
+            fields.append(a["name"])
+    count = None
+    try:
+        resp = await client.ows(
+            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+             "typeNames": f"{workspace}:{name}", "resultType": "hits"},
+            base=client.settings.wfs_base)
+        m = re.search(r'numberMatched="(\d+)"', resp.text)
+        if m:
+            count = int(m.group(1))
+    except (GeoServerError, ValueError):
+        pass
+    return {"geometry": geometry, "fields": fields, "count": count,
+            "title": ft.get("title") or name, "abstract": ft.get("abstract") or ""}
+
+
 @app.get("/api/config")
 async def config() -> dict:
     """Expose the bits the browser needs (e.g. the WMS base URL for Leaflet)."""
     client = get_client()
     return {
-        "wms_base": client.settings.wms_base,
+        # Same-origin WMS proxy (see /wms) — robust regardless of how/where
+        # GeoServer is exposed; the browser never hits the container hostname.
+        "wms_base": "/wms",
         "default_workspace": client.settings.default_workspace,
         "default_srs": client.settings.default_srs,
     }
 
 
+# ---- shapefile upload (ingestion) ----------------------------------------
+def _safe_extract(zf: zipfile.ZipFile, dest: Path) -> None:
+    """Extract a zip, refusing absolute paths or traversal outside ``dest``."""
+    dest = dest.resolve()
+    for member in zf.namelist():
+        target = (dest / member).resolve()
+        if not str(target).startswith(str(dest)):
+            raise HTTPException(status_code=400,
+                                detail=f"unsafe path in archive: {member}")
+    zf.extractall(dest)
+
+
+@app.post("/api/upload")
+async def upload_shapefile(file: UploadFile = File(...),
+                           name: str | None = Form(None)) -> dict:
+    """Ingest an uploaded zipped shapefile into PostGIS and publish it.
+
+    The browser uploads a ``.zip`` containing the shapefile sidecars
+    (``.shp/.shx/.dbf`` and ideally ``.prj``). Loaded into the ``uploads``
+    workspace/datastore, reprojected to EPSG:4326, then published.
+    """
+    filename = file.filename or "upload.zip"
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400,
+                            detail="upload a .zip containing the shapefile "
+                                   "(.shp/.shx/.dbf/.prj).")
+    payload = await file.read()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_dir = Path(tmp)
+        try:
+            with zipfile.ZipFile(io.BytesIO(payload)) as zf:
+                _safe_extract(zf, tmp_dir)
+        except zipfile.BadZipFile as exc:
+            raise HTTPException(status_code=400, detail=f"invalid zip: {exc}") from exc
+
+        shps = sorted(tmp_dir.rglob("*.shp"))
+        if not shps:
+            raise HTTPException(status_code=400,
+                                detail="no .shp found inside the archive.")
+        if len(shps) > 1 and not name:
+            raise HTTPException(
+                status_code=400,
+                detail=f"archive has {len(shps)} shapefiles; upload one at a "
+                       "time or pass an explicit 'name'.")
+        shp = shps[0]
+        table = sanitize(name or shp.stem)
+
+        await ensure_workspace(_UPLOAD_WS)
+        await ensure_datastore(_UPLOAD_WS, _UPLOAD_DS, _UPLOAD_PG)
+        srs = get_client().settings.default_srs
+        try:
+            await asyncio.to_thread(load_shapefile, shp, table, conn=_UPLOAD_PG,
+                                    target_srs=srs, force=False)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        await _guard(publish(_UPLOAD_WS, _UPLOAD_DS, table, srs=srs, title=shp.stem))
+        bbox = await featuretype_bbox(_UPLOAD_WS, table)
+
+    return {"workspace": _UPLOAD_WS, "datastore": _UPLOAD_DS, "layer": table,
+            "qualified": f"{_UPLOAD_WS}:{table}", "bbox": bbox}
+
+
+# ---- layer catalog + natural-language command -----------------------------
+async def _load_catalog() -> list:
+    """Build the catalog from the WMS capabilities (name + title + keywords).
+
+    Domain-agnostic: one GetCapabilities call gives every published layer's real
+    metadata, so the resolver matches requests semantically without any
+    hardcoded vocabulary.
+    """
+    client = get_client()
+    resp = await _guard(client.ows(
+        {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"},
+        base=client.settings.wms_base))
+    return build_catalog(parse_wms_capabilities(resp.text))
+
+
+@app.get("/api/layers")
+async def list_layers() -> list:
+    """Return the catalog of all published layers (name + title + keywords)."""
+    catalog = await _load_catalog()
+    return [{"name": m.name, "workspace": m.workspace, "qualified": m.qualified,
+             "label": m.label, "keywords": list(m.keywords)} for m in catalog]
+
+
+@app.get("/api/bbox")
+async def layer_bbox(workspace: str, name: str) -> dict:
+    """Return a layer's lat/lon bounding box (for zoom-to-extent)."""
+    bbox = await featuretype_bbox(workspace, name)
+    if not bbox:
+        raise HTTPException(status_code=404, detail="no bounding box for layer.")
+    return bbox
+
+
+class AskIn(BaseModel):
+    query: str
+
+
+_FILTER_HINTS: str | None = None
+
+
+def _filter_hints() -> str:
+    """Filterable attributes + allowed values, derived from the style config.
+
+    Lets the LLM build a valid ``cql_filter`` (e.g. high hazard classes) using
+    real column names and exact values — generic, no domain hardcoding.
+    """
+    global _FILTER_HINTS
+    if _FILTER_HINTS is None:
+        attrs: dict[str, list[tuple[str, str]]] = {}
+        for spec in _load_style_config().get("styles", {}).values():
+            attr, classes = spec.get("attribute"), spec.get("classes")
+            if not (attr and classes):
+                continue
+            for c in classes:
+                pair = (str(c.get("value")), str(c.get("label", "")))
+                attrs.setdefault(attr, [])
+                if pair not in attrs[attr]:
+                    attrs[attr].append(pair)
+        if not attrs:
+            _FILTER_HINTS = ""
+        else:
+            lines = ["Filterable attributes (use EXACT values in cql_filter):"]
+            for a, pairs in attrs.items():
+                vals = ", ".join(f"'{v}' ({lbl})" if lbl else f"'{v}'"
+                                 for v, lbl in pairs)
+                lines.append(f"- {a}: {vals}")
+            _FILTER_HINTS = "\n".join(lines)
+    return _FILTER_HINTS
+
+
+@app.post("/api/ask")
+async def ask(body: AskIn) -> dict:
+    """Map a natural-language request to layers via the LLM resolver.
+
+    Returns the matched (qualified) layer names, an optional CQL filter, a short
+    explanation, and the combined lat/lon bbox so the UI can render WMS + zoom.
+    """
+    query = (body.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="empty query.")
+
+    catalog = await _load_catalog()
+    prompt = (f"{catalog_prompt(catalog)}\n\n{_filter_hints()}\n\n"
+              f"Request: {query}\n\nJSON:")
+    try:
+        resolver = _get_resolver()
+        result = await resolver.run(prompt)
+        selection = validate_selection(result.text, catalog)
+    except ValueError as exc:
+        raise HTTPException(status_code=502,
+                            detail=f"could not parse model reply: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 — LLM/transport errors -> 502
+        raise HTTPException(status_code=502,
+                            detail=f"LLM resolver failed: {exc}") from exc
+
+    # Zoom to the combined extent of the selected layers (skip degenerate boxes —
+    # empty layers report (0,0,0,0), which would drag the extent to the sea).
+    boxes = []
+    for qualified in selection["layers"]:
+        ws, _, name = qualified.partition(":")
+        bbox = await featuretype_bbox(ws, name)
+        if bbox and bbox["maxx"] > bbox["minx"] and bbox["maxy"] > bbox["miny"]:
+            boxes.append(bbox)
+    combined = None
+    if boxes:
+        combined = {
+            "minx": min(b["minx"] for b in boxes),
+            "miny": min(b["miny"] for b in boxes),
+            "maxx": max(b["maxx"] for b in boxes),
+            "maxy": max(b["maxy"] for b in boxes),
+        }
+    selection["bbox"] = combined
+
+    # Describe the data type of each selected layer (geometry, count, fields).
+    info = []
+    for qualified in selection["layers"]:
+        ws, _, name = qualified.partition(":")
+        li = await _layer_info(ws, name)
+        if li:
+            info.append({"qualified": qualified, **li})
+    selection["info"] = info
+    return selection
+
+
 @app.get("/")
 async def index() -> FileResponse:
     return FileResponse(str(_STATIC / "index.html"))
+
+
+@app.get("/upload")
+async def upload_page() -> FileResponse:
+    """Dedicated shapefile-upload page (separate from the chat/map)."""
+    return FileResponse(str(_STATIC / "upload.html"))
 
 
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")

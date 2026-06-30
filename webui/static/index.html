@@ -1,113 +1,92 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="it">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>mcp-geo-server — test UI</title>
+  <title>mcp-geo-server — chat & mappa</title>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: system-ui, sans-serif; display: flex; height: 100vh; }
-    #sidebar { width: 420px; overflow-y: auto; padding: 12px; border-right: 1px solid #ddd; background: #fafafa; }
+    html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
+    body { display: flex; height: 100vh; }
+
+    /* Left: chat (half). Right: map (half). */
+    #chat { width: 42%; max-width: 560px; display: flex; flex-direction: column;
+      border-right: 1px solid #ddd; background: #f7f8fa; }
     #map { flex: 1; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    details { border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; background: #fff; }
-    summary { cursor: pointer; padding: 8px 10px; font-weight: 600; }
-    .body { padding: 10px; }
-    label { display: block; font-size: 12px; color: #444; margin-top: 6px; }
-    input, textarea { width: 100%; padding: 5px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
-    button { margin-top: 8px; padding: 6px 12px; border: 0; border-radius: 4px; background: #2563eb; color: #fff; cursor: pointer; }
-    button.secondary { background: #6b7280; }
-    pre { background: #0b1021; color: #d6e2ff; padding: 8px; border-radius: 4px; font-size: 12px; max-height: 180px; overflow: auto; white-space: pre-wrap; }
-    #status { padding: 6px 10px; border-radius: 4px; font-weight: 600; margin-bottom: 10px; }
-    .ok { background: #dcfce7; color: #166534; }
-    .bad { background: #fee2e2; color: #991b1b; }
+
+    header { padding: 12px 14px; border-bottom: 1px solid #e3e3e3; background: #fff;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    header h1 { font-size: 16px; margin: 0; }
+    header .sub { font-size: 11px; color: #777; }
+    header a { font-size: 13px; color: #2563eb; text-decoration: none; white-space: nowrap; }
+    #status { font-size: 11px; padding: 2px 8px; border-radius: 10px; }
+    #status.ok { background: #dcfce7; color: #166534; }
+    #status.bad { background: #fee2e2; color: #991b1b; }
+
+    #messages { flex: 1; overflow-y: auto; padding: 14px; display: flex;
+      flex-direction: column; gap: 10px; }
+    .msg { max-width: 88%; padding: 8px 11px; border-radius: 12px; font-size: 14px;
+      line-height: 1.35; white-space: pre-wrap; word-wrap: break-word; }
+    .msg.user { align-self: flex-end; background: #2563eb; color: #fff; border-bottom-right-radius: 3px; }
+    .msg.bot { align-self: flex-start; background: #fff; border: 1px solid #e3e3e3; border-bottom-left-radius: 3px; }
+    .msg.bot .layers { margin-top: 6px; font-size: 12px; color: #555; }
+    .msg.bot .layers code { background: #eef; padding: 1px 4px; border-radius: 3px; }
+    .msg.err { align-self: flex-start; background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+    .hint { align-self: center; color: #999; font-size: 12px; text-align: center; }
+
+    #composer { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #e3e3e3; background: #fff; }
+    #composer input { flex: 1; padding: 9px 11px; font-size: 14px; border: 1px solid #ccc; border-radius: 8px; }
+    #composer button { padding: 9px 16px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; font-size: 14px; cursor: pointer; }
+    #composer button:disabled { background: #9bb4ef; cursor: default; }
+
+    #legend { position: absolute; right: 12px; bottom: 12px; z-index: 1000;
+      background: rgba(255,255,255,0.94); border: 1px solid #ccc; border-radius: 6px;
+      padding: 8px 10px; max-width: 280px; max-height: 60vh; overflow-y: auto;
+      font-size: 12px; box-shadow: 0 1px 6px rgba(0,0,0,0.2); display: none; }
+    #legend h4 { margin: 0 0 6px; font-size: 12px; }
+    #legend .leg-layer { margin-bottom: 8px; }
+    #legend .leg-layer b { display: block; font-size: 11px; color: #333; margin-bottom: 2px; word-break: break-all; }
+    #legend img { display: block; max-width: 100%; }
   </style>
 </head>
 <body>
-  <div id="sidebar">
-    <h1>mcp-geo-server</h1>
-    <div id="status" class="bad">checking…</div>
-
-    <details open>
-      <summary>Workspaces</summary>
-      <div class="body">
-        <button onclick="listWorkspaces()">List</button>
-        <label>New workspace name</label>
-        <input id="ws_name" placeholder="demo" />
-        <label><input type="checkbox" id="ws_default" style="width:auto"> default</label>
-        <button onclick="createWorkspace()">Create</button>
-        <pre id="out_ws"></pre>
+  <div id="chat">
+    <header>
+      <div>
+        <h1>🗺️ Assistente GeoServer</h1>
+        <div class="sub">Chiedi in linguaggio naturale e i dati appaiono sulla mappa</div>
       </div>
-    </details>
-
-    <details>
-      <summary>PostGIS datastore</summary>
-      <div class="body">
-        <label>Workspace</label><input id="ds_ws" placeholder="demo" />
-        <label>Name</label><input id="ds_name" placeholder="pg" />
-        <label>Host</label><input id="ds_host" value="postgis" />
-        <label>Database</label><input id="ds_db" value="gis" />
-        <label>User</label><input id="ds_user" value="gis" />
-        <label>Password</label><input id="ds_pass" value="gis" />
-        <label>Schema</label><input id="ds_schema" value="public" />
-        <button onclick="createDatastore()">Create datastore</button>
-        <button class="secondary" onclick="listDatastores()">List</button>
-        <pre id="out_ds"></pre>
+      <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px">
+        <a href="/upload">⬆️ Carica shapefile</a>
+        <span id="status" class="bad">…</span>
       </div>
-    </details>
+    </header>
 
-    <details>
-      <summary>Publish feature type</summary>
-      <div class="body">
-        <label>Workspace</label><input id="ft_ws" placeholder="demo" />
-        <label>Datastore</label><input id="ft_ds" placeholder="pg" />
-        <label>Table</label><input id="ft_table" placeholder="my_table" />
-        <label>Layer name (optional)</label><input id="ft_name" />
-        <button onclick="publishFt()">Publish</button>
-        <button class="secondary" onclick="listAvailable()">List available tables</button>
-        <pre id="out_ft"></pre>
-      </div>
-    </details>
+    <div id="messages">
+      <div class="hint">Esempi: «mostrami le frane lineari del Molise» · «i comuni d'Italia» · «pericolosità da frana in Campania»</div>
+    </div>
 
-    <details>
-      <summary>Styles (SLD)</summary>
-      <div class="body">
-        <label>Workspace (blank = global)</label><input id="st_ws" />
-        <label>Style name</label><input id="st_name" placeholder="red_point" />
-        <label>SLD</label><textarea id="st_sld" rows="5"></textarea>
-        <button onclick="createStyle()">Create style</button>
-        <label>Assign to layer</label><input id="st_layer" placeholder="layer name" />
-        <button onclick="assignStyle()">Assign as default</button>
-        <pre id="out_st"></pre>
-      </div>
-    </details>
-
-    <details open>
-      <summary>Map &amp; WFS</summary>
-      <div class="body">
-        <label>Workspace</label><input id="map_ws" placeholder="demo" />
-        <label>Layer name(s), comma separated</label><input id="map_layers" placeholder="states" />
-        <button onclick="addWmsOverlay()">Show as WMS overlay</button>
-        <button class="secondary" onclick="loadGeoJSON()">Load as GeoJSON</button>
-        <label>CQL filter (optional)</label><input id="map_cql" />
-        <pre id="out_map"></pre>
-      </div>
-    </details>
+    <div id="composer">
+      <input id="q" placeholder="Scrivi qui…" autocomplete="off"
+             onkeydown="if(event.key==='Enter')send()" />
+      <button id="sendbtn" onclick="send()">Invia</button>
+    </div>
   </div>
 
   <div id="map"></div>
+  <div id="legend"></div>
 
   <script>
     let CONFIG = { wms_base: "" };
-    const map = L.map("map").setView([20, 0], 2);
+    const map = L.map("map").setView([42, 12.5], 6);
     L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19,
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
     }).addTo(map);
-    let geojsonLayer = null;
     const wmsLayers = {};
+    const enc = encodeURIComponent;
 
     async function api(path, opts) {
       const res = await fetch(path, opts);
@@ -116,100 +95,121 @@
       if (!res.ok) throw new Error(typeof data === "object" ? (data.detail || text) : text);
       return data;
     }
-    const show = (id, data) => document.getElementById(id).textContent =
-      typeof data === "string" ? data : JSON.stringify(data, null, 2);
-    const fail = (id, e) => document.getElementById(id).textContent = "ERROR: " + e.message;
 
     async function checkStatus() {
       const el = document.getElementById("status");
       try {
         const s = await api("/api/status");
         CONFIG = await api("/api/config");
-        if (s.connected) { el.className = "ok"; el.textContent = "Connected: " + s.url; }
-        else { el.className = "bad"; el.textContent = "Not connected: " + (s.error || s.url); }
-      } catch (e) { el.className = "bad"; el.textContent = "Not connected: " + e.message; }
+        if (s.connected) { el.className = "ok"; el.textContent = "connesso"; }
+        else { el.className = "bad"; el.textContent = "non connesso"; }
+      } catch (e) { el.className = "bad"; el.textContent = "non connesso"; }
     }
 
-    async function listWorkspaces() {
-      try { show("out_ws", await api("/api/workspaces")); } catch (e) { fail("out_ws", e); }
+    // ---- map helpers ----
+    function clearWms() {
+      Object.values(wmsLayers).forEach(l => map.removeLayer(l));
+      Object.keys(wmsLayers).forEach(k => delete wmsLayers[k]);
     }
-    async function createWorkspace() {
-      try {
-        const body = { name: val("ws_name"), default: document.getElementById("ws_default").checked };
-        show("out_ws", await api("/api/workspaces", post(body)));
-      } catch (e) { fail("out_ws", e); }
+    function addWmsQualified(qualified, cql) {
+      // Larger tiles + update-when-idle reduce the burst of concurrent tile
+      // requests (which GeoServer can transiently throttle with 429).
+      const params = { layers: qualified, format: "image/png", transparent: true,
+        version: "1.1.1", tileSize: 512, updateWhenIdle: true, crossOrigin: true };
+      if (cql) params.cql_filter = cql;
+      wmsLayers[qualified] = L.tileLayer.wms(CONFIG.wms_base, params).addTo(map);
     }
-    async function listDatastores() {
-      try { show("out_ds", await api("/api/datastores?workspace=" + enc(val("ds_ws")))); }
-      catch (e) { fail("out_ds", e); }
+    function zoomToBbox(b) {
+      if (!b) return;
+      const bounds = L.latLngBounds([[b.miny, b.minx], [b.maxy, b.maxx]]);
+      if (bounds.isValid()) map.fitBounds(bounds);
     }
-    async function createDatastore() {
-      try {
-        const body = { name: val("ds_name"), host: val("ds_host"), database: val("ds_db"),
-          user: val("ds_user"), password: val("ds_pass"), schema_: val("ds_schema"),
-          workspace: val("ds_ws") };
-        show("out_ds", await api("/api/datastores", post(body)));
-      } catch (e) { fail("out_ds", e); }
-    }
-    async function listAvailable() {
-      try {
-        const q = "?workspace=" + enc(val("ft_ws")) + "&datastore=" + enc(val("ft_ds")) + "&only_available=true";
-        show("out_ft", await api("/api/featuretypes" + q));
-      } catch (e) { fail("out_ft", e); }
-    }
-    async function publishFt() {
-      try {
-        const body = { workspace: val("ft_ws"), datastore: val("ft_ds"), table: val("ft_table"),
-          name: val("ft_name") || null };
-        show("out_ft", await api("/api/featuretypes", post(body)));
-      } catch (e) { fail("out_ft", e); }
-    }
-    async function createStyle() {
-      try {
-        const body = { name: val("st_name"), sld: val("st_sld"), workspace: val("st_ws") || null };
-        show("out_st", await api("/api/styles", post(body)));
-      } catch (e) { fail("out_st", e); }
-    }
-    async function assignStyle() {
-      try {
-        const body = { layer: val("st_layer"), style: val("st_name"), workspace: val("st_ws") };
-        show("out_st", await api("/api/styles/assign", post(body)));
-      } catch (e) { fail("out_st", e); }
+    function renderLegend() {
+      const box = document.getElementById("legend");
+      const active = Object.keys(wmsLayers);
+      if (!active.length) { box.style.display = "none"; box.innerHTML = ""; return; }
+      let html = "<h4>Legenda</h4>";
+      active.forEach(q => {
+        const url = CONFIG.wms_base + "?service=WMS&version=1.1.1&request=GetLegendGraphic" +
+          "&format=image/png&layer=" + enc(q) +
+          "&legend_options=" + enc("forceLabels:on;fontAntiAliasing:true;fontName:sans");
+        html += `<div class="leg-layer"><b>${q}</b><img src="${url}" alt="legend ${q}"></div>`;
+      });
+      box.innerHTML = html;
+      box.style.display = "block";
     }
 
-    function addWmsOverlay() {
-      const ws = val("map_ws"), names = val("map_layers");
-      const qualified = names.split(",").map(n => (ws ? ws + ":" : "") + n.trim()).join(",");
-      if (wmsLayers[qualified]) { map.removeLayer(wmsLayers[qualified]); delete wmsLayers[qualified]; }
-      const lyr = L.tileLayer.wms(CONFIG.wms_base, {
-        layers: qualified, format: "image/png", transparent: true, version: "1.1.1"
-      }).addTo(map);
-      wmsLayers[qualified] = lyr;
-      show("out_map", "WMS overlay added: " + qualified);
+    // ---- chat ----
+    const messages = document.getElementById("messages");
+    function bubble(cls, html) {
+      const d = document.createElement("div");
+      d.className = "msg " + cls;
+      d.innerHTML = html;
+      messages.appendChild(d);
+      messages.scrollTop = messages.scrollHeight;
+      return d;
     }
+    const escapeHtml = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
-    async function loadGeoJSON() {
+    async function send() {
+      const input = document.getElementById("q");
+      const q = input.value.trim();
+      if (!q) return;
+      const btn = document.getElementById("sendbtn");
+      input.value = "";
+      bubble("user", escapeHtml(q));
+      btn.disabled = true;
+      const thinking = bubble("bot", "…");
       try {
-        const ws = val("map_ws");
-        let q = "?type_name=" + enc(val("map_layers").split(",")[0].trim());
-        if (ws) q += "&workspace=" + enc(ws);
-        if (val("map_cql")) q += "&cql_filter=" + enc(val("map_cql"));
-        const data = await api("/api/wfs" + q);
-        if (geojsonLayer) map.removeLayer(geojsonLayer);
-        geojsonLayer = L.geoJSON(data, {
-          onEachFeature: (f, l) => {
-            if (f.properties) l.bindPopup(Object.entries(f.properties)
-              .map(([k, v]) => "<b>" + k + "</b>: " + v).join("<br>"));
-          }
-        }).addTo(map);
-        if (geojsonLayer.getBounds().isValid()) map.fitBounds(geojsonLayer.getBounds());
-        show("out_map", (data.features || []).length + " features loaded");
-      } catch (e) { fail("out_map", e); }
-    }
+        const r = await api("/api/ask", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query: q })
+        });
+        if (!r.layers || !r.layers.length) {
+          thinking.innerHTML = (r.explanation ? escapeHtml(r.explanation) + "<br>" : "") +
+            "<i>Nessun layer corrispondente.</i>";
+        } else {
+          const info = {};
+          (r.info || []).forEach(i => info[i.qualified] = i);
+          // Split populated vs empty layers: only draw/describe the ones with
+          // data; empty layers (e.g. a region with no records) are just noted,
+          // so the answer stays coherent when several layers are returned.
+          const populated = r.layers.filter(l => !info[l] || info[l].count !== 0);
+          const empty = r.layers.filter(l => info[l] && info[l].count === 0);
 
-    const val = id => document.getElementById(id).value.trim();
-    const enc = encodeURIComponent;
-    const post = body => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+          clearWms();
+          populated.forEach(l => addWmsQualified(l, r.cql_filter));
+          zoomToBbox(r.bbox);
+          renderLegend();
+
+          let html = escapeHtml(r.explanation || "Ecco i dati richiesti.");
+          const descs = populated.map(l => {
+            const i = info[l];
+            if (!i) return "Dati vettoriali mostrati sulla mappa.";
+            let s = `Sono <b>${i.geometry || "dati vettoriali"}</b>`;
+            if (i.count != null) s += ` con <b>${i.count}</b> elementi`;
+            s += ".";
+            if (i.fields && i.fields.length)
+              s += ` Attributi disponibili: ${i.fields.slice(0, 10).map(escapeHtml).join(", ")}.`;
+            return s;
+          });
+          if (descs.length) html += `<div class="layers">${descs.join("<br>")}</div>`;
+          if (!populated.length)
+            html += `<div class="layers">Per quest'area non sono presenti dati da mostrare sulla mappa.</div>`;
+          else if (empty.length)
+            html += `<div class="layers"><small>Nota: ${empty.length} altro/i layer non contiene dati per quest'area e non è stato mostrato.</small></div>`;
+          if (r.cql_filter) html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
+          thinking.innerHTML = html;
+          thinking.title = r.layers.join(", ");  // technical names on hover only
+        }
+      } catch (e) {
+        thinking.className = "msg err";
+        thinking.textContent = "Errore: " + e.message;
+      } finally {
+        btn.disabled = false;
+        input.focus();
+      }
+    }
 
     checkStatus();
   </script>

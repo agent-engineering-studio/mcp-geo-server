@@ -50,3 +50,24 @@ urllib.request.urlopen(url, timeout=4)" || exit 1
 
 # Default: serve the FastAPI test UI. Override the command for the MCP server.
 CMD ["sh", "-c", "uvicorn webui.app:app --host 0.0.0.0 --port ${WEBUI_PORT}"]
+
+
+# ============================================================================
+#  bootstrap stage — one-shot data initialiser (compose service `geo-init`).
+#
+#  Adds GDAL (ogr2ogr) + the Postgres client on top of the app image so it can
+#  load every shapefile found under /data into PostGIS and publish each one to
+#  GeoServer. Kept as a separate stage so the webui/mcp images stay lean.
+#
+#  Build:  docker build --target bootstrap -t mcp-geo-server:bootstrap .
+# ============================================================================
+FROM base AS bootstrap
+
+USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gdal-bin postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+USER app
+
+# Idempotent: re-running just skips already-loaded tables / published layers.
+CMD ["python", "-m", "mcp_geo_server.bootstrap"]
