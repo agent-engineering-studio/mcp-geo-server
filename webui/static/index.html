@@ -169,28 +169,35 @@
           thinking.innerHTML = (r.explanation ? escapeHtml(r.explanation) + "<br>" : "") +
             "<i>Nessun layer corrispondente.</i>";
         } else {
-          clearWms();
-          r.layers.forEach(l => addWmsQualified(l, r.cql_filter));
-          zoomToBbox(r.bbox);
-          renderLegend();
           const info = {};
           (r.info || []).forEach(i => info[i.qualified] = i);
-          // Build a fully textual, descriptive answer (no technical layer ids).
-          const sentences = r.layers.map(l => {
+          // Split populated vs empty layers: only draw/describe the ones with
+          // data; empty layers (e.g. a region with no records) are just noted,
+          // so the answer stays coherent when several layers are returned.
+          const populated = r.layers.filter(l => !info[l] || info[l].count !== 0);
+          const empty = r.layers.filter(l => info[l] && info[l].count === 0);
+
+          clearWms();
+          populated.forEach(l => addWmsQualified(l, r.cql_filter));
+          zoomToBbox(r.bbox);
+          renderLegend();
+
+          let html = escapeHtml(r.explanation || "Ecco i dati richiesti.");
+          const descs = populated.map(l => {
             const i = info[l];
-            if (!i) return "";
-            const geom = i.geometry || "dati vettoriali";
-            if (i.count === 0)
-              return `Il dato è di tipo <b>${geom}</b>, ma per quest'area non contiene elementi: non c'è nulla da mostrare sulla mappa.`;
-            let s = `Sono ${geom}`;
+            if (!i) return "Dati vettoriali mostrati sulla mappa.";
+            let s = `Sono <b>${i.geometry || "dati vettoriali"}</b>`;
             if (i.count != null) s += ` con <b>${i.count}</b> elementi`;
             s += ".";
             if (i.fields && i.fields.length)
-              s += ` Per ogni elemento sono disponibili gli attributi: ${i.fields.slice(0, 10).map(escapeHtml).join(", ")}.`;
+              s += ` Attributi disponibili: ${i.fields.slice(0, 10).map(escapeHtml).join(", ")}.`;
             return s;
-          }).filter(Boolean);
-          let html = escapeHtml(r.explanation || "Ecco i dati richiesti.");
-          if (sentences.length) html += `<div class="layers">${sentences.join("<br>")}</div>`;
+          });
+          if (descs.length) html += `<div class="layers">${descs.join("<br>")}</div>`;
+          if (!populated.length)
+            html += `<div class="layers">Per quest'area non sono presenti dati da mostrare sulla mappa.</div>`;
+          else if (empty.length)
+            html += `<div class="layers"><small>Nota: ${empty.length} altro/i layer non contiene dati per quest'area e non è stato mostrato.</small></div>`;
           if (r.cql_filter) html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
           thinking.innerHTML = html;
           thinking.title = r.layers.join(", ");  // technical names on hover only
