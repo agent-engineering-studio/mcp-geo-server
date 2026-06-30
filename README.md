@@ -20,6 +20,12 @@ The same async core (`GeoServerClient` + the `geo_*` tool functions + the shared
 `ingest`/`catalog`/`styling` modules) is used by the agent, the web UI and the
 data bootstrap — there is exactly one place that talks to GeoServer.
 
+![mcp-geo-server — chat-first web UI: ask in natural language, the matching layers render on the map with a thematic legend](docs/screenshot-chat-map.png)
+
+*The chat (left) resolves a natural-language request to GeoServer layers and
+renders them on the map (right) with a thematic legend — here the landslide
+areas of the Marche region, classified by movement type.*
+
 ---
 
 ## Highlights
