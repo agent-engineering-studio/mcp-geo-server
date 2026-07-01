@@ -48,7 +48,7 @@ services:
       - ./data:/data:ro
       # Preprocessed rasters (COGs built by geo-init when
       # GEO_INIT_RASTER_PREPROCESS=true) live here — GeoServer reads them too.
-      - rasterproc:/data-processed:ro
+      - ./data-processed:/data-processed:ro
 
   # NOTE: no `ollama` service — the stack always uses a HOST Ollama (reachable at
   # host.docker.internal:11434), Ollama Cloud, or Anthropic, selected via
@@ -109,7 +109,7 @@ services:
     volumes:
       - ./data:/data:ro
       # Writable output for COG preprocessing (shared read-only with GeoServer).
-      - rasterproc:/data-processed
+      - ./data-processed:/data-processed
 
   # Web UI (FastAPI + Leaflet). Built from the `bootstrap` stage so it has GDAL
   # (ogr2ogr) + psql for shapefile upload/ingestion, and reaches the LLM for the
@@ -204,4 +204,3 @@ services:
 volumes:
   pgdata:
   gsdata:
-  rasterproc:

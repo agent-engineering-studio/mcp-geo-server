@@ -262,10 +262,13 @@ def preprocess_geotiff(src: Path, out_dir: Path, *, force: bool = False,
     logger.info("Building COG %s -> %s (overviews, %s)…", src.name, out.name,
                 resampling)
     proc = subprocess.run(cmd, capture_output=True, text=True)
-    if proc.returncode != 0:
+    # gdal_translate can exit 0 even when it fails to create the file (e.g. a
+    # permission error on the output dir prints "ERROR 4" but returns 0), so
+    # verify the output actually exists rather than trusting the return code.
+    if proc.returncode != 0 or not out.exists():
         raise RuntimeError(
             f"gdal_translate (COG) failed for {src} (exit {proc.returncode}):\n"
-            f"{proc.stderr.strip()}")
+            f"{(proc.stderr or proc.stdout).strip()}")
     return out
 
 
