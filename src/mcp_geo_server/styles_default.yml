@@ -92,6 +92,23 @@ styles:
     color: "#444444"
     title: "Limiti amministrativi"
 
+  # DTM / DEM elevation colour ramp (RasterSymbolizer). `entries` = pixel value
+  # (metres) -> colour; type: ramp interpolates between them. Adjust the
+  # quantities to your DTM's real elevation range.
+  dtm_elevation:
+    kind: raster
+    color_map_type: ramp
+    opacity: 1.0
+    title: "Quota (DTM)"
+    entries:
+      - {quantity: 0,    color: "#1a9850", label: "0 m"}
+      - {quantity: 300,  color: "#91cf60", label: "300 m"}
+      - {quantity: 700,  color: "#d9ef8b", label: "700 m"}
+      - {quantity: 1200, color: "#fee08b", label: "1200 m"}
+      - {quantity: 1800, color: "#fc8d59", label: "1800 m"}
+      - {quantity: 2600, color: "#d73027", label: "2600 m"}
+      - {quantity: 3500, color: "#ffffff", label: "3500 m"}
+
 assign:
   - {name_matches: "^frane_line",            style: frana_tipo_line}
   - {name_matches: "^frane_piff",            style: frana_tipo_point}
@@ -99,3 +116,4 @@ assign:
   - {name_contains: idraulica,               style: pericolosita_idraulica}
   - {name_matches: "mosaicatura.*frana",     style: pericolosita_pai}
   - {name_matches: "^(com|provcm|reg|ripgeo)[0-9]", style: limiti_outline}
+  - {name_matches: "(dtm|dem)",              style: dtm_elevation}

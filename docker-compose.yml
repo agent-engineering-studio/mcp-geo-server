@@ -40,6 +40,15 @@ services:
       - "8080:8080"
     volumes:
       - gsdata:${GEOSERVER_DATA_DIR:-/opt/geoserver/data_dir}
+      # Raster data (GeoTIFF / DTM) is registered as EXTERNAL coverage stores
+      # pointing at file:/data/... — unlike vectors (pushed into PostGIS over the
+      # network), GeoServer must read the raster file itself. Mounted read-only
+      # at the SAME path the geo-init container uses, so the file: URL matches on
+      # both sides. Zero-copy: the .tif stays on the host, not duplicated.
+      - ./data:/data:ro
+      # Preprocessed rasters (COGs built by geo-init when
+      # GEO_INIT_RASTER_PREPROCESS=true) live here — GeoServer reads them too.
+      - rasterproc:/data-processed:ro
 
   # NOTE: no `ollama` service — the stack always uses a HOST Ollama (reachable at
   # host.docker.internal:11434), Ollama Cloud, or Anthropic, selected via
@@ -82,6 +91,16 @@ services:
       GEO_INIT_SOURCE_SRS: ${GEO_INIT_SOURCE_SRS:-}
       GEO_INIT_FORCE: ${GEO_INIT_FORCE:-false}
       GEO_INIT_SHAPE_ENCODING: ${GEO_INIT_SHAPE_ENCODING:-ISO-8859-1}
+      # Raster (GeoTIFF / DTM) publishing: every *.tif/*.tiff under /data is
+      # registered as an external coverage store. GeoServer reads it via the
+      # shared ./data mount (see the geoserver service). Rasters land in the
+      # same workspace as the vectors by default.
+      GEO_INIT_RASTER_ENABLE: ${GEO_INIT_RASTER_ENABLE:-true}
+      GEO_INIT_RASTER_WORKSPACE: ${GEO_INIT_RASTER_WORKSPACE:-}
+      # COG preprocessing (overviews). Off by default: rewriting a large DTM is
+      # slow and doubles disk. Turn on for big rasters so WMS stays fast.
+      GEO_INIT_RASTER_PREPROCESS: ${GEO_INIT_RASTER_PREPROCESS:-false}
+      GEO_INIT_RASTER_PROCESSED_DIR: /data-processed
       GEO_INIT_STYLES: ${GEO_INIT_STYLES:-true}
       # Thematic style config, read from the mounted ./data dir. Edit
       # data/styles.yml to restyle for any domain (falls back to the packaged
@@ -89,6 +108,8 @@ services:
       GEO_STYLES_CONFIG: ${GEO_STYLES_CONFIG:-/data/styles.yml}
     volumes:
       - ./data:/data:ro
+      # Writable output for COG preprocessing (shared read-only with GeoServer).
+      - rasterproc:/data-processed
 
   # Web UI (FastAPI + Leaflet). Built from the `bootstrap` stage so it has GDAL
   # (ogr2ogr) + psql for shapefile upload/ingestion, and reaches the LLM for the
@@ -183,3 +204,4 @@ services:
 volumes:
   pgdata:
   gsdata:
+  rasterproc:

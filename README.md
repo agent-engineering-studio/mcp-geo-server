@@ -112,9 +112,12 @@ and retries on transient `429` so tiled overlays load reliably.
 
 **Bootstrap** — the `geo-init` container loads **every** shapefile under `./data`
 into PostGIS and publishes each as a GeoServer layer (default workspace `ispra`,
-datastore `ispra_pg`), reprojecting to EPSG:4326. Fully idempotent and
-transversal — no assumption about folder names; the layer name comes from the
-parent folder. It runs automatically on `make up`; re-run on demand:
+datastore `ispra_pg`), reprojecting to EPSG:4326. It also registers **every
+GeoTIFF** (`*.tif` / `*.tiff`, e.g. a DTM/DEM) as an *external* coverage store —
+zero-copy: GeoServer reads the file in place through the shared `./data` mount,
+the raster is never duplicated. Fully idempotent and transversal — no assumption
+about folder names; the layer name comes from the parent folder. It runs
+automatically on `make up`; re-run on demand:
 
 ```bash
 make init          # load any new shapefiles + (re)apply styles
@@ -131,6 +134,9 @@ make init-logs     # tail the geo-init logs
 | `GEO_INIT_SOURCE_SRS` | _(none)_ | Fallback source SRS for shapefiles without a `.prj` |
 | `GEO_INIT_SHAPE_ENCODING` | `ISO-8859-1` | Shapefile attribute encoding (e.g. ISPRA `.cst`) |
 | `GEO_INIT_FORCE` | `false` | Drop & reload existing tables |
+| `GEO_INIT_RASTER_ENABLE` | `true` | Register GeoTIFFs (`*.tif`/`*.tiff`) as coverage stores |
+| `GEO_INIT_RASTER_WORKSPACE` | _(vector workspace)_ | Workspace for the raster coverages |
+| `GEO_INIT_RASTER_PREPROCESS` | `false` | Rewrite each raster as a COG (overviews) for fast WMS — recommended for large DTMs |
 | `GEO_INIT_STYLES` | `true` | Apply the thematic styles after publishing |
 | `GEO_STYLES_CONFIG` | `/data/styles.yml` | Style config file (falls back to the packaged default if missing) |
 | `GEO_UPLOAD_WORKSPACE` / `GEO_UPLOAD_DATASTORE` | `uploads` / `uploads_pg` | Target for UI shapefile uploads |
@@ -144,16 +150,22 @@ fallback.
 ```yaml
 styles:                       # name -> SLD definition
   frana_tipo_poly:
-    kind: polygon             # polygon | line | point | flat | outline
+    kind: polygon             # polygon | line | point | flat | outline | raster
     attribute: tipo_movim     # categorical: one rule per class
     stroke: true
     classes:
       - {value: "1", label: "Crollo / Ribaltamento", color: "#e41a1c"}
       # ...
+  dtm_elevation:              # raster elevation ramp (RasterSymbolizer)
+    kind: raster
+    entries:
+      - {quantity: 0, color: "#1a9850", label: "0 m"}
+      - {quantity: 3500, color: "#ffffff", label: "3500 m"}
 assign:                       # ordered rules, FIRST match wins (by layer name)
   - {name_matches: "^frane_line", style: frana_tipo_line}
   - {name_matches: "^(frane|aree|dgpv)_poly", style: frana_tipo_poly}
   - {name_contains: idraulica, style: pericolosita_idraulica}
+  - {name_matches: "(dtm|dem)", style: dtm_elevation}
 ```
 
 `assign` rules match a layer **by name** (`name_contains` substring or
@@ -283,7 +295,7 @@ images to the GitHub Container Registry:
 | `ghcr.io/<owner>/mcp-geo-server:latest` | `base` | app image (web UI + MCP agent) |
 | `ghcr.io/<owner>/mcp-geo-server:bootstrap` | `bootstrap` | adds GDAL (`ogr2ogr`) + `psql` for data init / upload |
 
-## Agent tools (28 `geo_*` functions)
+## Agent tools (32 `geo_*` functions)
 
 These are the tools the agent calls internally (they are not exposed
 individually over MCP — the agent is). `make tools` lists them.
@@ -299,6 +311,10 @@ individually over MCP — the agent is). `make tools` lists them.
 | `geo_get_datastore` | read | Get one datastore |
 | `geo_create_datastore_postgis` | write | Create a PostGIS datastore |
 | `geo_delete_datastore` | destructive | Delete datastore (`recurse`) |
+| `geo_list_coveragestores` | read | List coverage (raster) stores |
+| `geo_get_coverage` | read | Get a published coverage (bbox / SRS) |
+| `geo_create_coveragestore_geotiff` | write | Register a GeoTIFF as an external coverage store + publish it |
+| `geo_delete_coveragestore` | destructive | Delete coverage store (`recurse`; leaves the file on disk) |
 | `geo_list_featuretypes` | read | List feature types (or available tables) |
 | `geo_publish_featuretype` | write | Publish a table as a layer (recalculates bbox) |
 | `geo_list_layers` | read | List layers |

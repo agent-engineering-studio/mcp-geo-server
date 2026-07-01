@@ -148,6 +148,28 @@ def build_style(name: str, spec: dict) -> str:
         return _wrap(name, f"<Rule><Title>{_xml(spec.get('title', name))}</Title>"
                            f"{sym}</Rule>")
 
+    if kind == "raster":
+        # Elevation/DTM colour ramp: a RasterSymbolizer + ColorMap over the
+        # pixel value. `entries` is a list of {quantity, color, label?, opacity?}.
+        entries = spec.get("entries") or []
+        if not entries:
+            raise ValueError(f"style '{name}': raster kind needs 'entries' "
+                             "(list of {quantity, color}).")
+        opacity = spec.get("opacity", 1.0)
+        cmtype = spec.get("color_map_type", "ramp")  # ramp | intervals | values
+        cm = "".join(
+            f'<ColorMapEntry color="{e["color"]}" quantity="{e["quantity"]}"'
+            + (f' label="{_xml(e["label"])}"' if e.get("label") else "")
+            + (f' opacity="{e["opacity"]}"' if "opacity" in e else "")
+            + "/>"
+            for e in entries
+        )
+        sym = (f'<RasterSymbolizer><Opacity>{opacity}</Opacity>'
+               f'<ColorMap type="{_xml(cmtype)}">{cm}</ColorMap>'
+               f'</RasterSymbolizer>')
+        return _wrap(name, f"<Rule><Title>{_xml(spec.get('title', name))}</Title>"
+                           f"{sym}</Rule>")
+
     # categorical polygon / line / point
     if kind not in ("polygon", "line", "point"):
         raise ValueError(f"style '{name}': unknown kind '{kind}'")

@@ -37,6 +37,7 @@ from mcp_geo_server.ingest import (
     ensure_datastore,
     ensure_workspace,
     featuretype_bbox,
+    layer_bbox,
     load_shapefile,
     publish,
     sanitize,
@@ -318,7 +319,16 @@ async def _layer_info(workspace: str, name: str) -> dict | None:
         data = await client.get_json(
             f"workspaces/{workspace}/featuretypes/{name}.json")
     except GeoServerError:
-        return None
+        # Not a vector feature type — try a raster coverage (DTM/GeoTIFF).
+        try:
+            cdata = await client.get_json(
+                f"workspaces/{workspace}/coverages/{name}.json")
+        except GeoServerError:
+            return None
+        cov = cdata.get("coverage", {}) if isinstance(cdata, dict) else {}
+        return {"geometry": "raster", "fields": [], "count": None,
+                "title": cov.get("title") or name,
+                "abstract": cov.get("abstract") or ""}
     ft = data.get("featureType", {}) if isinstance(data, dict) else {}
     atts = ft.get("attributes", {}).get("attribute", []) or []
     geometry, fields = None, []
@@ -446,7 +456,7 @@ async def list_layers() -> list:
 @app.get("/api/bbox")
 async def layer_bbox(workspace: str, name: str) -> dict:
     """Return a layer's lat/lon bounding box (for zoom-to-extent)."""
-    bbox = await featuretype_bbox(workspace, name)
+    bbox = await layer_bbox(workspace, name)
     if not bbox:
         raise HTTPException(status_code=404, detail="no bounding box for layer.")
     return bbox
@@ -519,7 +529,7 @@ async def ask(body: AskIn) -> dict:
     boxes = []
     for qualified in selection["layers"]:
         ws, _, name = qualified.partition(":")
-        bbox = await featuretype_bbox(ws, name)
+        bbox = await layer_bbox(ws, name)
         if bbox and bbox["maxx"] > bbox["minx"] and bbox["maxy"] > bbox["miny"]:
             boxes.append(bbox)
     combined = None
