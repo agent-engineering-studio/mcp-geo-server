@@ -454,8 +454,13 @@ async def list_layers() -> list:
 
 
 @app.get("/api/bbox")
-async def layer_bbox(workspace: str, name: str) -> dict:
-    """Return a layer's lat/lon bounding box (for zoom-to-extent)."""
+async def api_layer_bbox(workspace: str, name: str) -> dict:
+    """Return a layer's lat/lon bounding box (for zoom-to-extent).
+
+    NB the endpoint is deliberately NOT named ``layer_bbox`` — that would shadow
+    the imported :func:`mcp_geo_server.ingest.layer_bbox` helper at module scope
+    and make this call (and the one in ``/api/ask``) recurse infinitely.
+    """
     bbox = await layer_bbox(workspace, name)
     if not bbox:
         raise HTTPException(status_code=404, detail="no bounding box for layer.")
