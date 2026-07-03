@@ -504,6 +504,164 @@ def _filter_hints() -> str:
     return _FILTER_HINTS
 
 
+# ---- admin-area (comune / provincia / regione) spatial scoping -----------
+# When a chat request names an administrative unit, zoom to it and CLIP the
+# rendered layers to its exact boundary. ISTAT boundary layers, most specific
+# first (a comune match beats a regione match). Workspace defaults to the
+# catalog workspace; override with GEO_ADMIN_WORKSPACE.
+_ADMIN_WS = (os.environ.get("GEO_ADMIN_WORKSPACE") or "").strip()
+_ADMIN_LEVELS = [
+    {"level": "comune",    "layer": "com01012023_g",    "attr": "comune"},
+    {"level": "provincia", "layer": "provcm01012023_g", "attr": "den_uts"},
+    {"level": "regione",   "layer": "reg01012023_g",    "attr": "den_reg"},
+]
+_ADMIN_INDEX: list[tuple[str, dict, str]] | None = None
+_ADMIN_SCOPE_CACHE: dict[tuple[str, str], dict | None] = {}
+
+
+def _admin_ws() -> str:
+    return _ADMIN_WS or (get_client().settings.default_workspace or "")
+
+
+def _demojibake(s: str) -> str:
+    """Repair classic double-encoded latin-1/UTF-8 text ('AgliÃ¨' -> 'Agliè').
+
+    Some boundary layers were loaded with the wrong encoding, so the DB holds
+    the mojibake. Used only for MATCHING against user text and for display — the
+    raw stored value is still used in the CQL filter that fetches the geometry.
+    """
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
+
+def _norm_admin(s: str) -> str:
+    """Accent/case/punctuation-insensitive key for matching place names."""
+    import unicodedata
+    s = _demojibake(s)
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+async def _admin_names(level: dict) -> list[str]:
+    """Raw stored names for one boundary layer (geometry excluded)."""
+    client = get_client()
+    try:
+        resp = await client.ows(
+            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+             "typeNames": f"{_admin_ws()}:{level['layer']}",
+             "propertyName": level["attr"], "count": "20000",
+             "outputFormat": "application/json"},
+            base=client.settings.wfs_base)
+        import json as _json
+        data = _json.loads(resp.text)
+        return [f.get("properties", {}).get(level["attr"])
+                for f in data.get("features", [])
+                if f.get("properties", {}).get(level["attr"])]
+    except (GeoServerError, ValueError):
+        return []
+
+
+async def _admin_index() -> list[tuple[str, dict, str]]:
+    """Build ``(normalized_name, level, raw_name)`` once (cached process-wide)."""
+    global _ADMIN_INDEX
+    if _ADMIN_INDEX is None:
+        idx: list[tuple[str, dict, str]] = []
+        for level in _ADMIN_LEVELS:
+            for raw in await _admin_names(level):
+                n = _norm_admin(raw)
+                if len(n) >= 3:  # skip 2-letter names (false-positive prone)
+                    idx.append((n, level, raw))
+        _ADMIN_INDEX = idx
+    return _ADMIN_INDEX
+
+
+# Level keywords in the query force that admin level (e.g. 'provincia di Bari'
+# should scope to the province, not the comune that shares the name).
+_LEVEL_HINTS = {
+    "regione": "regione", "regionale": "regione",
+    "provincia": "provincia", "provincie": "provincia", "prov": "provincia",
+    "metropolitana": "provincia",  # 'città metropolitana di ...'
+    "comune": "comune",
+}
+
+
+def _level_hint(q_norm: str) -> str | None:
+    """The admin level explicitly named in the (normalized) query, if any."""
+    tokens = set(q_norm.split())
+    for kw, lvl in _LEVEL_HINTS.items():
+        if kw in tokens:
+            return lvl
+    return None
+
+
+async def _detect_admin(query: str) -> tuple[dict, str] | None:
+    """The admin unit named in the query, if any.
+
+    Matches whole normalized phrases (space-padded) so 'regione' won't spuriously
+    match a 2-letter comune. If the query names a level ('provincia di Bari'),
+    that level wins; otherwise the most specific (then longest) match wins.
+    """
+    q_norm = _norm_admin(query)
+    q = f" {q_norm} "
+    hint = _level_hint(q_norm)
+    order = {lvl["level"]: i for i, lvl in enumerate(_ADMIN_LEVELS)}
+    best: tuple[dict, str] | None = None
+    best_key = (99, 99, 0)
+    for n, level, raw in await _admin_index():
+        if f" {n} " in q:
+            lvl = level["level"]
+            # 0 if it matches the level the user named, else 1 (hint wins).
+            hint_rank = 0 if (hint and lvl == hint) else 1
+            key = (hint_rank, order[lvl], -len(n))
+            if key < best_key:
+                best_key, best = key, (level, raw)
+    return best
+
+
+async def _admin_scope(level: dict, raw_name: str) -> dict | None:
+    """Zoom bbox + clip WKT (EPSG:4326) for one admin unit. Cached."""
+    ck = (level["layer"], raw_name)
+    if ck in _ADMIN_SCOPE_CACHE:
+        return _ADMIN_SCOPE_CACHE[ck]
+    client = get_client()
+    scope = None
+    try:
+        cql = f"{level['attr']}='{raw_name.replace(chr(39), chr(39) * 2)}'"
+        resp = await client.ows(
+            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+             "typeNames": f"{_admin_ws()}:{level['layer']}", "cql_filter": cql,
+             "count": "1", "srsName": "EPSG:4326",
+             "outputFormat": "application/json"},
+            base=client.settings.wfs_base)
+        import json as _json
+        feats = _json.loads(resp.text).get("features", [])
+        geom_json = feats[0].get("geometry") if feats else None
+        if geom_json:
+            from shapely.geometry import shape
+            geom = shape(geom_json)
+            minx, miny, maxx, maxy = geom.bounds
+            # Simplify enough that the clip WKT fits in the WMS tile GET URL
+            # (Tomcat caps the request line at ~8 KB).
+            tol = 0.001
+            wkt = geom.simplify(tol, preserve_topology=True).wkt
+            while len(wkt) > 3500 and tol < 1:
+                tol *= 2
+                wkt = geom.simplify(tol, preserve_topology=True).wkt
+            scope = {
+                "level": level["level"],
+                "name": _demojibake(raw_name),
+                "bbox": {"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy},
+                "clip": f"SRID=4326;{wkt}",
+            }
+    except Exception:  # noqa: BLE001 — scoping is best-effort, never fail the ask
+        scope = None
+    _ADMIN_SCOPE_CACHE[ck] = scope
+    return scope
+
+
 @app.post("/api/ask")
 async def ask(body: AskIn) -> dict:
     """Map a natural-language request to layers via the LLM resolver.
@@ -555,6 +713,17 @@ async def ask(body: AskIn) -> dict:
         if li:
             info.append({"qualified": qualified, **li})
     selection["info"] = info
+
+    # Admin-area scoping: if the request names a comune/provincia/regione, zoom
+    # to that unit and clip the rendered layers to its exact boundary (so e.g.
+    # "il DTM della Puglia" shows only Puglia, not the whole national raster).
+    admin = await _detect_admin(query)
+    if admin:
+        scope = await _admin_scope(*admin)
+        if scope:
+            selection["admin"] = {"level": scope["level"], "name": scope["name"]}
+            selection["bbox"] = scope["bbox"]   # override: zoom to the unit
+            selection["clip"] = scope["clip"]   # frontend passes to the WMS
     return selection
 
 

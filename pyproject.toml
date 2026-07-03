@@ -29,6 +29,10 @@ dev = [
 webui = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
+    # Geometry simplification for the admin-area (comune/provincia/regione) clip
+    # in the chat: the region polygon is simplified so its WKT fits in the WMS
+    # tile GET URL.
+    "shapely>=2.0",
 ]
 
 [project.scripts]
