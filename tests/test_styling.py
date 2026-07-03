@@ -32,7 +32,37 @@ def test_default_config_has_expected_ispra_styles(styles):
     assert set(styles) == {
         "frana_tipo_poly", "frana_tipo_line", "frana_tipo_point",
         "pericolosita_pai", "pericolosita_idraulica", "limiti_outline",
+        "dtm_elevation",
     }
+
+
+def test_raster_style_builds_colormap():
+    sld = build_style("dtm", {
+        "kind": "raster",
+        "opacity": 0.9,
+        "color_map_type": "ramp",
+        "entries": [
+            {"quantity": 0, "color": "#1a9850", "label": "0 m"},
+            {"quantity": 3000, "color": "#ffffff"},
+        ],
+    })
+    import xml.dom.minidom as minidom
+    minidom.parseString(sld)  # well-formed
+    assert "<RasterSymbolizer>" in sld
+    assert '<ColorMap type="ramp">' in sld
+    assert sld.count("<ColorMapEntry") == 2
+    assert 'quantity="3000"' in sld
+    assert "<Opacity>0.9</Opacity>" in sld
+
+
+def test_raster_style_requires_entries():
+    with pytest.raises(ValueError):
+        build_style("bad", {"kind": "raster"})
+
+
+def test_default_dtm_style_maps_by_name(cfg):
+    assert style_for_layer("lombardia_dtm", cfg["assign"]) == "dtm_elevation"
+    assert style_for_layer("dem_5m_trento", cfg["assign"]) == "dtm_elevation"
 
 
 def test_all_styles_are_well_formed_xml(styles):

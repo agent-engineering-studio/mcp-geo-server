@@ -111,12 +111,19 @@
       Object.values(wmsLayers).forEach(l => map.removeLayer(l));
       Object.keys(wmsLayers).forEach(k => delete wmsLayers[k]);
     }
-    function addWmsQualified(qualified, cql) {
+    function addWmsQualified(qualified, cql, clip, zIndex) {
       // Larger tiles + update-when-idle reduce the burst of concurrent tile
       // requests (which GeoServer can transiently throttle with 429).
       const params = { layers: qualified, format: "image/png", transparent: true,
         version: "1.1.1", tileSize: 512, updateWhenIdle: true, crossOrigin: true };
       if (cql) params.cql_filter = cql;
+      // clip = "SRID=4326;<WKT>" of an admin unit (comune/provincia/regione):
+      // GeoServer clips the rendered output to that polygon, reprojecting from
+      // 4326 to the tile CRS. Leaflet URL-encodes it into the tile requests.
+      if (clip) params.clip = clip;
+      // Explicit stacking: rasters get a low zIndex (drawn at the bottom),
+      // vectors a higher one, so an opaque raster never hides the vectors.
+      if (zIndex != null) params.zIndex = zIndex;
       wmsLayers[qualified] = L.tileLayer.wms(CONFIG.wms_base, params).addTo(map);
     }
     function zoomToBbox(b) {
@@ -178,11 +185,23 @@
           const empty = r.layers.filter(l => info[l] && info[l].count === 0);
 
           clearWms();
-          populated.forEach(l => addWmsQualified(l, r.cql_filter));
+          // The server returns `layers` already in draw order (bottom -> top):
+          // rasters below vectors, broadest raster lowest. We just render in
+          // that order; zIndex mirrors it so the stacking is explicit. (populated
+          // is r.layers filtered, so it preserves the server order.)
+          // Per-layer CQL from the server (attribute filter + region INTERSECTS
+          // for vectors). The polygon `clip` is applied only to RASTERS —
+          // vectors are bounded by their INTERSECTS filter (robust; no overlay).
+          const cqlFor = r.cql_by_layer || {};
+          populated.forEach((l, i) => {
+            const isRaster = info[l] && info[l].kind === "raster";
+            addWmsQualified(l, cqlFor[l] || null, isRaster ? r.clip : null, 300 + i);
+          });
           zoomToBbox(r.bbox);
           renderLegend();
 
           let html = escapeHtml(r.explanation || "Ecco i dati richiesti.");
+          if (r.admin) html += ` <i>(ritagliato su ${escapeHtml(r.admin.level)} ${escapeHtml(r.admin.name)})</i>`;
           const descs = populated.map(l => {
             const i = info[l];
             if (!i) return "Dati vettoriali mostrati sulla mappa.";
@@ -198,7 +217,18 @@
             html += `<div class="layers">Per quest'area non sono presenti dati da mostrare sulla mappa.</div>`;
           else if (empty.length)
             html += `<div class="layers"><small>Nota: ${empty.length} altro/i layer non contiene dati per quest'area e non è stato mostrato.</small></div>`;
-          if (r.cql_filter) html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
+          if (r.cql_filter) {
+            if (r.cql_applicable)
+              html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
+            else
+              html += `<div class="layers"><small>Filtro «${escapeHtml(r.cql_filter)}» non applicabile ai layer selezionati (attributo assente): mostro i dati non filtrati.</small></div>`;
+          }
+          // Terrain enrichment: the server returns a display-ready `text`
+          // (title + per-layer sentence), so we just print it.
+          if (r.enrichment && r.enrichment.text) {
+            const lines = r.enrichment.text.split("\n").map(escapeHtml);
+            html += `<div class="layers"><b>${lines[0]}</b><br>${lines.slice(1).join("<br>")}</div>`;
+          }
           thinking.innerHTML = html;
           thinking.title = r.layers.join(", ");  // technical names on hover only
         }

@@ -112,9 +112,12 @@ and retries on transient `429` so tiled overlays load reliably.
 
 **Bootstrap** — the `geo-init` container loads **every** shapefile under `./data`
 into PostGIS and publishes each as a GeoServer layer (default workspace `ispra`,
-datastore `ispra_pg`), reprojecting to EPSG:4326. Fully idempotent and
-transversal — no assumption about folder names; the layer name comes from the
-parent folder. It runs automatically on `make up`; re-run on demand:
+datastore `ispra_pg`), reprojecting to EPSG:4326. It also registers **every
+GeoTIFF** (`*.tif` / `*.tiff`, e.g. a DTM/DEM) as an *external* coverage store —
+zero-copy: GeoServer reads the file in place through the shared `./data` mount,
+the raster is never duplicated. Fully idempotent and transversal — no assumption
+about folder names; the layer name comes from the parent folder. It runs
+automatically on `make up`; re-run on demand:
 
 ```bash
 make init          # load any new shapefiles + (re)apply styles
@@ -131,6 +134,9 @@ make init-logs     # tail the geo-init logs
 | `GEO_INIT_SOURCE_SRS` | _(none)_ | Fallback source SRS for shapefiles without a `.prj` |
 | `GEO_INIT_SHAPE_ENCODING` | `ISO-8859-1` | Shapefile attribute encoding (e.g. ISPRA `.cst`) |
 | `GEO_INIT_FORCE` | `false` | Drop & reload existing tables |
+| `GEO_INIT_RASTER_ENABLE` | `true` | Register GeoTIFFs (`*.tif`/`*.tiff`) as coverage stores |
+| `GEO_INIT_RASTER_WORKSPACE` | _(vector workspace)_ | Workspace for the raster coverages |
+| `GEO_INIT_RASTER_PREPROCESS` | `false` | Rewrite each raster as a COG (overviews) for fast WMS — recommended for large DTMs |
 | `GEO_INIT_STYLES` | `true` | Apply the thematic styles after publishing |
 | `GEO_STYLES_CONFIG` | `/data/styles.yml` | Style config file (falls back to the packaged default if missing) |
 | `GEO_UPLOAD_WORKSPACE` / `GEO_UPLOAD_DATASTORE` | `uploads` / `uploads_pg` | Target for UI shapefile uploads |
@@ -144,16 +150,22 @@ fallback.
 ```yaml
 styles:                       # name -> SLD definition
   frana_tipo_poly:
-    kind: polygon             # polygon | line | point | flat | outline
+    kind: polygon             # polygon | line | point | flat | outline | raster
     attribute: tipo_movim     # categorical: one rule per class
     stroke: true
     classes:
       - {value: "1", label: "Crollo / Ribaltamento", color: "#e41a1c"}
       # ...
+  dtm_elevation:              # raster elevation ramp (RasterSymbolizer)
+    kind: raster
+    entries:
+      - {quantity: 0, color: "#1a9850", label: "0 m"}
+      - {quantity: 3500, color: "#ffffff", label: "3500 m"}
 assign:                       # ordered rules, FIRST match wins (by layer name)
   - {name_matches: "^frane_line", style: frana_tipo_line}
   - {name_matches: "^(frane|aree|dgpv)_poly", style: frana_tipo_poly}
   - {name_contains: idraulica, style: pericolosita_idraulica}
+  - {name_matches: "(dtm|dem)", style: dtm_elevation}
 ```
 
 `assign` rules match a layer **by name** (`name_contains` substring or
@@ -171,9 +183,27 @@ restyle for another domain, edit `data/styles.yml` and run `make styles`.
    the request against that metadata and returns the exact layer name(s), an
    optional `cql_filter`, and a short explanation. Hallucinated names are
    dropped against the catalog.
-3. Filterable attributes (with their allowed values) are derived from the style
-   config and passed to the resolver, so it can build a CQL on real values
-   (e.g. `per_fr_ita = 'Elevata P3'` for *"alta pericolosità"*).
+3. Filterable attributes (with their allowed values **and the layers they live
+   on**) are derived from the style config and passed to the resolver, so it
+   builds a CQL on real values and picks a layer that actually has the attribute
+   (e.g. `per_fr_ita = 'Elevata P3'` for *"alta pericolosità"* → the hazard
+   layer, not a landslide-inventory one).
+
+The server does the rest — the response is ready for any map client:
+
+- **Draw order** — `layers` come back bottom→top (rasters below vectors;
+  broadest raster lowest) with a `kind` per layer, so an opaque raster never
+  hides the vectors.
+- **Admin-area scoping** — if the request names a *comune / provincia / regione*
+  (ISTAT boundary layers), the response carries the zoom `bbox` and, per layer,
+  the way to restrict it to that area: rasters get an exact-polygon `clip`,
+  vectors get a CQL `INTERSECTS` spatial filter (a robust predicate — no
+  geometry overlay, so no JTS *non-noded intersection* failure on dense layers).
+- **Per-layer CQL** — `cql_by_layer` only applies a filter to layers that have
+  the attribute, so one filter can't fail the whole render.
+- **Terrain enrichment** — if the request names a metric (quota / slope / aspect
+  / curvature), the selected vector layers are enriched from a DTM
+  (`geo_enrich_from_dtm`) and a ready-to-show summary is returned.
 
 Because it relies on GeoServer metadata + config, it works for **any** GeoServer
 — just publish layers with meaningful titles/keywords (and, optionally, your own
@@ -283,7 +313,7 @@ images to the GitHub Container Registry:
 | `ghcr.io/<owner>/mcp-geo-server:latest` | `base` | app image (web UI + MCP agent) |
 | `ghcr.io/<owner>/mcp-geo-server:bootstrap` | `bootstrap` | adds GDAL (`ogr2ogr`) + `psql` for data init / upload |
 
-## Agent tools (28 `geo_*` functions)
+## Agent tools (33 `geo_*` functions)
 
 These are the tools the agent calls internally (they are not exposed
 individually over MCP — the agent is). `make tools` lists them.
@@ -299,6 +329,11 @@ individually over MCP — the agent is). `make tools` lists them.
 | `geo_get_datastore` | read | Get one datastore |
 | `geo_create_datastore_postgis` | write | Create a PostGIS datastore |
 | `geo_delete_datastore` | destructive | Delete datastore (`recurse`) |
+| `geo_list_coveragestores` | read | List coverage (raster) stores |
+| `geo_get_coverage` | read | Get a published coverage (bbox / SRS) |
+| `geo_create_coveragestore_geotiff` | write | Register a GeoTIFF as an external coverage store + publish it |
+| `geo_delete_coveragestore` | destructive | Delete coverage store (`recurse`; leaves the file on disk) |
+| `geo_enrich_from_dtm` | read | Terrain metrics (quota/slope/aspect/curvature) for a vector layer, sampled from a DTM coverage |
 | `geo_list_featuretypes` | read | List feature types (or available tables) |
 | `geo_publish_featuretype` | write | Publish a table as a layer (recalculates bbox) |
 | `geo_list_layers` | read | List layers |

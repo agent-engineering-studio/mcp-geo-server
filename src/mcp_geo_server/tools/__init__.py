@@ -32,6 +32,7 @@ def resolve_srs(srs: str | None) -> str:
 def collect_tools() -> list[Callable]:
     """Return every ``geo_*`` tool function, in a stable catalogue order."""
     from . import (
+        coveragestores,
         datastores,
         featuretypes,
         layers,
@@ -39,6 +40,7 @@ def collect_tools() -> list[Callable]:
         ogc,
         status,
         styles,
+        terrain,
         workspaces,
     )
 
@@ -55,6 +57,11 @@ def collect_tools() -> list[Callable]:
         datastores.geo_get_datastore,
         datastores.geo_create_datastore_postgis,
         datastores.geo_delete_datastore,
+        # coverage stores (raster / GeoTIFF)
+        coveragestores.geo_list_coveragestores,
+        coveragestores.geo_get_coverage,
+        coveragestores.geo_create_coveragestore_geotiff,
+        coveragestores.geo_delete_coveragestore,
         # feature types
         featuretypes.geo_list_featuretypes,
         featuretypes.geo_publish_featuretype,
@@ -71,6 +78,8 @@ def collect_tools() -> list[Callable]:
         styles.geo_update_style,
         styles.geo_assign_style_to_layer,
         styles.geo_delete_style,
+        # terrain analysis (DTM enrichment)
+        terrain.geo_enrich_from_dtm,
         # OGC
         ogc.geo_wms_get_capabilities,
         ogc.geo_wms_get_map,

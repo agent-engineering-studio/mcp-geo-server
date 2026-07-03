@@ -19,6 +19,7 @@ from pathlib import Path
 
 from .client import GeoServerError, get_client
 from .formatting import extract
+from .tools.coveragestores import geo_create_coveragestore_geotiff
 from .tools.datastores import geo_create_datastore_postgis
 from .tools.featuretypes import geo_publish_featuretype
 from .tools.workspaces import geo_create_workspace
@@ -170,6 +171,129 @@ async def featuretype_bbox(workspace: str, name: str) -> dict | None:
         return None
     ft = data.get("featureType", {}) if isinstance(data, dict) else {}
     return ft.get("latLonBoundingBox")
+
+
+async def coverage_bbox(workspace: str, name: str) -> dict | None:
+    """Return a published *coverage* (raster) lat/lon bounding box, or None.
+
+    The raster counterpart of :func:`featuretype_bbox` — coverages live under a
+    different REST path (``coverages`` not ``featuretypes``).
+    """
+    client = get_client()
+    try:
+        data = await client.get_json(f"workspaces/{workspace}/coverages/{name}.json")
+    except GeoServerError:
+        return None
+    cov = data.get("coverage", {}) if isinstance(data, dict) else {}
+    return cov.get("latLonBoundingBox")
+
+
+async def layer_bbox(workspace: str, name: str) -> dict | None:
+    """Lat/lon bbox of a layer regardless of kind (vector OR raster).
+
+    Tries the feature-type path first, then falls back to the coverage path, so
+    UI callers do not need to know whether a layer is a shapefile or a GeoTIFF.
+    """
+    return (await featuretype_bbox(workspace, name)
+            or await coverage_bbox(workspace, name))
+
+
+# --------------------------------------------------------------------------
+# Raster (GeoTIFF / DTM) publish — external coverage store, zero-copy
+# --------------------------------------------------------------------------
+def file_url_for(path: Path) -> str:
+    """Filesystem location GeoServer uses to read a raster on its own FS.
+
+    A plain **absolute path**, not a ``file://`` URL: GeoServer's external
+    coverage-store endpoint rejects ``file://`` URLs on some distributions
+    (kartoza 2.28 returns HTTP 400 "Failed to locate the input file"), while the
+    bare path is accepted everywhere. Both the init container and GeoServer
+    mount the data dir at the same path (``/data``), so the absolute path is
+    identical on both sides — no translation needed.
+    """
+    return str(path.resolve())
+
+
+async def list_coveragestore_names(workspace: str) -> set[str]:
+    """Names of coverage stores already present in a workspace (empty if none).
+
+    The raster idempotency check, mirroring
+    :func:`list_featuretype_names` for vectors.
+    """
+    client = get_client()
+    try:
+        data = await client.get_json(f"workspaces/{workspace}/coveragestores.json")
+    except GeoServerError:
+        return set()
+    return {cs.get("name")
+            for cs in extract(data, "coverageStores", "coverageStore")
+            if isinstance(cs, dict) and cs.get("name")}
+
+
+def preprocess_geotiff(src: Path, out_dir: Path, *, force: bool = False,
+                       resampling: str = "average",
+                       compress: str = "DEFLATE") -> Path:
+    """Rewrite a GeoTIFF as a Cloud-Optimized GeoTIFF (tiled + overviews).
+
+    A large DTM (national 5 m coverage = tens of GB) served without overviews
+    makes WMS painfully slow at small scales: GeoServer must read the full-res
+    tiles for a zoomed-out view. A COG carries internal overviews so GeoServer
+    reads a downsampled level instead. This writes the COG to ``out_dir`` (a
+    writable location GeoServer can also read — the source ``/data`` mount is
+    read-only) and returns its path. Idempotent: skips when the output exists.
+
+    Requires ``gdal_translate`` (GDAL) on PATH — present in the Docker bootstrap
+    image. ``resampling`` is the overview resampling (``average`` suits
+    continuous elevation data).
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / f"{sanitize(src.stem)}.tif"
+    if not force and out.exists():
+        logger.info("Processed COG '%s' already exists — skip.", out.name)
+        return out
+    cmd = [
+        "gdal_translate", str(src), str(out),
+        "-of", "COG",
+        "-co", f"COMPRESS={compress}",
+        "-co", "BIGTIFF=YES",
+        "-co", "NUM_THREADS=ALL_CPUS",
+        "-co", f"RESAMPLING={resampling}",
+    ]
+    logger.info("Building COG %s -> %s (overviews, %s)…", src.name, out.name,
+                resampling)
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    # gdal_translate can exit 0 even when it fails to create the file (e.g. a
+    # permission error on the output dir prints "ERROR 4" but returns 0), so
+    # verify the output actually exists rather than trusting the return code.
+    if proc.returncode != 0 or not out.exists():
+        raise RuntimeError(
+            f"gdal_translate (COG) failed for {src} (exit {proc.returncode}):\n"
+            f"{(proc.stderr or proc.stdout).strip()}")
+    return out
+
+
+async def publish_geotiff(workspace: str, store: str, tif: Path, *,
+                          title: str | None = None,
+                          existing: set[str] | None = None) -> bool:
+    """Register a GeoTIFF as an external coverage store + publish it. True if new.
+
+    Idempotent: skips when the coverage store already exists. The coverage
+    (published layer) is named after the store, so the layer name is
+    deterministic and matches the vector naming convention.
+    """
+    if existing is not None:
+        if store in existing:
+            return False
+    else:
+        path = f"workspaces/{workspace}/coveragestores/{store}.json"
+        if await resource_exists(path):
+            return False
+    await geo_create_coveragestore_geotiff(
+        name=store, file_url=file_url_for(tif), workspace=workspace,
+        coverage_name=store, title=title,
+    )
+    logger.info("Published coverage '%s:%s' from %s.", workspace, store, tif.name)
+    return True
 
 
 # --------------------------------------------------------------------------

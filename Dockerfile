@@ -67,6 +67,11 @@ USER root
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gdal-bin postgresql-client \
     && rm -rf /var/lib/apt/lists/*
+# Preprocessing output dir (COGs). Created app-owned so a named volume mounted
+# here initialises with app ownership — the container runs as the unprivileged
+# `app` user and must be able to write the generated COGs (GeoServer reads them
+# read-only). GEO_INIT_RASTER_PROCESSED_DIR defaults to this path.
+RUN mkdir -p /data-processed && chown app:app /data-processed
 USER app
 
 # Idempotent: re-running just skips already-loaded tables / published layers.

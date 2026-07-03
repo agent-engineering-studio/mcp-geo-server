@@ -17,6 +17,7 @@ from .config import get_settings
 DESTRUCTIVE_TOOLS = frozenset({
     "geo_delete_workspace",
     "geo_delete_datastore",
+    "geo_delete_coveragestore",
     "geo_delete_layer",
     "geo_delete_style",
     "geo_wfs_transaction",  # delete/update/raw all mutate feature data

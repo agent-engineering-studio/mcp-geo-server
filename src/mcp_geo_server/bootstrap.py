@@ -33,9 +33,12 @@ from .ingest import (
     PgConn,
     ensure_datastore,
     ensure_workspace,
+    list_coveragestore_names,
     list_featuretype_names,
     load_shapefile,
+    preprocess_geotiff,
     publish,
+    publish_geotiff,
     sanitize,
 )
 
@@ -63,6 +66,20 @@ class BootstrapConfig:
         # Optional fallback source SRS for shapefiles that ship without a .prj.
         self.source_srs = (os.environ.get("GEO_INIT_SOURCE_SRS") or "").strip()
         self.force = _env_bool("GEO_INIT_FORCE", False)
+        # Raster (GeoTIFF / DTM) publishing. Rasters are registered as external
+        # coverage stores (zero-copy) in this workspace (defaults to the same as
+        # the vectors, so everything shows up under one workspace in the UI).
+        self.raster_enable = _env_bool("GEO_INIT_RASTER_ENABLE", True)
+        self.raster_workspace = (os.environ.get("GEO_INIT_RASTER_WORKSPACE")
+                                 or self.workspace).strip()
+        # Optional Cloud-Optimized-GeoTIFF preprocessing (adds overviews so a
+        # large DTM serves fast over WMS). Off by default: it rewrites each
+        # raster (time + disk), which is only worthwhile for big rasters. The
+        # output dir must be writable AND readable by GeoServer (a shared volume,
+        # since /data is mounted read-only).
+        self.raster_preprocess = _env_bool("GEO_INIT_RASTER_PREPROCESS", False)
+        self.raster_processed_dir = Path(
+            os.environ.get("GEO_INIT_RASTER_PROCESSED_DIR") or "/data-processed")
         # Apply the thematic SLD styles after publishing.
         self.styles = _env_bool("GEO_INIT_STYLES", True)
         # Shapefile attribute encoding. These ISPRA datasets ship a .cst file
@@ -110,6 +127,15 @@ def discover_shapefiles(data_dir: Path) -> list[Path]:
     return sorted(p for p in data_dir.rglob("*.shp") if p.is_file())
 
 
+def discover_rasters(data_dir: Path) -> list[Path]:
+    """Return every GeoTIFF (``*.tif`` / ``*.tiff``) under ``data_dir``, sorted.
+
+    Case-insensitive, so ``.TIF`` from Windows-exported DTMs is found too.
+    """
+    return sorted(p for p in data_dir.rglob("*")
+                  if p.is_file() and p.suffix.lower() in (".tif", ".tiff"))
+
+
 def layer_name_for(shp: Path) -> str:
     """Derive a unique, sanitized layer/table name for a shapefile.
 
@@ -123,6 +149,24 @@ def layer_name_for(shp: Path) -> str:
     """
     siblings = [p for p in shp.parent.glob("*.shp") if p.is_file()]
     base = shp.parent.name if len(siblings) == 1 else f"{shp.parent.name}_{shp.stem}"
+    return sanitize(base)
+
+
+def raster_name_for(tif: Path, data_dir: Path | None = None) -> str:
+    """Derive a unique, sanitized coverage/layer name for a GeoTIFF.
+
+    A GeoTIFF is self-contained (no sidecar bundle like a shapefile), so its own
+    file stem is usually the meaningful name (e.g. ``HRDTM5m.tif`` -> ``hrdtm5m``).
+    Only when it sits in a dedicated *subfolder* do we fold the folder name in —
+    that mirrors the region-per-folder convention used for the vector data
+    (``.../lombardia/dtm.tif`` -> ``lombardia_dtm``). A raster in the data-dir
+    root keeps just its stem (the root folder name, e.g. ``data``, is meaningless).
+    """
+    if data_dir is not None and tif.parent.resolve() == data_dir.resolve():
+        return sanitize(tif.stem)
+    siblings = [p for p in tif.parent.glob("*")
+                if p.is_file() and p.suffix.lower() in (".tif", ".tiff")]
+    base = tif.parent.name if len(siblings) == 1 else f"{tif.parent.name}_{tif.stem}"
     return sanitize(base)
 
 
@@ -179,17 +223,53 @@ async def run() -> int:
             failed += 1
             logger.error("  FAILED %s: %s", shp.name, exc)
 
+    # ---- rasters (GeoTIFF / DTM) -> external coverage stores --------------
+    rasters = discover_rasters(cfg.data_dir) if cfg.raster_enable else []
+    if rasters:
+        await ensure_workspace(cfg.raster_workspace)
+        existing_cov = await list_coveragestore_names(cfg.raster_workspace)
+        seen_cov: dict[str, Path] = {}
+        for tif in rasters:
+            store = raster_name_for(tif, cfg.data_dir)
+            if store in seen_cov:
+                logger.warning("Duplicate coverage name '%s' from %s (already "
+                               "from %s) — skipping.", store, tif, seen_cov[store])
+                continue
+            seen_cov[store] = tif
+            logger.info("• %s -> coverage %s", tif.relative_to(cfg.data_dir), store)
+            try:
+                source = tif
+                if cfg.raster_preprocess and store not in existing_cov:
+                    source = preprocess_geotiff(tif, cfg.raster_processed_dir,
+                                                force=cfg.force)
+                if await publish_geotiff(cfg.raster_workspace, store, source,
+                                         title=tif.stem,
+                                         existing=existing_cov):
+                    existing_cov.add(store)
+                    published += 1
+            except Exception as exc:  # noqa: BLE001 — keep going on a bad raster
+                failed += 1
+                logger.error("  FAILED %s: %s", tif.name, exc)
+
     if cfg.styles:
         from .styling import apply as apply_styles
-        try:
-            styled = await apply_styles(cfg.workspace)
-            logger.info("Thematic styles assigned to %d layer(s).", styled)
-        except Exception as exc:  # noqa: BLE001 — styling is non-fatal
-            logger.error("Thematic styling failed: %s", exc)
+        # Style each workspace we published into (vectors + rasters may share one
+        # workspace, or the raster workspace may differ).
+        workspaces = [cfg.workspace]
+        if cfg.raster_enable and cfg.raster_workspace not in workspaces:
+            workspaces.append(cfg.raster_workspace)
+        for ws in workspaces:
+            try:
+                styled = await apply_styles(ws)
+                logger.info("Thematic styles assigned to %d layer(s) in '%s'.",
+                            styled, ws)
+            except Exception as exc:  # noqa: BLE001 — styling is non-fatal
+                logger.error("Thematic styling failed for '%s': %s", ws, exc)
 
     logger.info(
-        "Bootstrap done: %d shapefile(s) found, %d loaded, %d published, %d failed.",
-        len(shapefiles), loaded, published, failed)
+        "Bootstrap done: %d shapefile(s) + %d raster(s) found, %d loaded, "
+        "%d published, %d failed.",
+        len(shapefiles), len(rasters), loaded, published, failed)
     return 1 if failed else 0
 
 

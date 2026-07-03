@@ -37,6 +37,7 @@ from mcp_geo_server.ingest import (
     ensure_datastore,
     ensure_workspace,
     featuretype_bbox,
+    layer_bbox,
     load_shapefile,
     publish,
     sanitize,
@@ -74,12 +75,26 @@ _RESOLVER_INSTRUCTIONS = (
     'language>"}\n'
     "Rules:\n"
     "- pick ONLY names that appear verbatim in the catalog; match the request "
-    "against each layer's name, title and keywords; prefer the most specific "
-    "layers; if ambiguous include the few best matches.\n"
+    "against each layer's SUBJECT (its name, title and keywords).\n"
+    "- A place name (region/province/comune, e.g. \"Valle d'Aosta\", \"Bari\") "
+    "only restricts the AREA shown — the area clip is applied automatically "
+    "afterwards. Use the place to choose a layer ONLY when the requested subject "
+    "has per-place variants (e.g. landslide layers exist per region); otherwise "
+    "ignore the place when selecting. NEVER add a layer of a DIFFERENT subject "
+    "just because its name contains the place. Example: \"DTM della Valle "
+    "d'Aosta\" -> the DTM / elevation layer ONLY (subject = DTM), NOT the "
+    "landslide layers of Valle d'Aosta.\n"
+    "- return as FEW layers as possible — only those whose subject was asked "
+    "for; include several only when the request is genuinely ambiguous.\n"
     "- cql_filter: when the user asks for a SUBSET by an attribute value (e.g. "
     "'alta/elevata pericolosità'), build a CQL using ONLY the attributes and "
     "EXACT values listed under 'Filterable attributes'; otherwise null. Never "
-    "invent layer, column or value names."
+    "invent layer, column or value names.\n"
+    "- an attribute exists ONLY on the layers matching its pattern in "
+    "'Filterable attributes'. If you build a cql_filter on an attribute, you "
+    "MUST select a layer whose name matches that attribute's pattern — e.g. a "
+    "hazard-class filter goes on the hazard layer, NOT on a landslide-inventory "
+    "layer that lacks that column."
 )
 
 
@@ -318,15 +333,26 @@ async def _layer_info(workspace: str, name: str) -> dict | None:
         data = await client.get_json(
             f"workspaces/{workspace}/featuretypes/{name}.json")
     except GeoServerError:
-        return None
+        # Not a vector feature type — try a raster coverage (DTM/GeoTIFF).
+        try:
+            cdata = await client.get_json(
+                f"workspaces/{workspace}/coverages/{name}.json")
+        except GeoServerError:
+            return None
+        cov = cdata.get("coverage", {}) if isinstance(cdata, dict) else {}
+        return {"geometry": "raster", "fields": [], "count": None,
+                "title": cov.get("title") or name,
+                "abstract": cov.get("abstract") or ""}
     ft = data.get("featureType", {}) if isinstance(data, dict) else {}
     atts = ft.get("attributes", {}).get("attribute", []) or []
-    geometry, fields = None, []
+    geometry, geom_col, fields = None, None, None
+    fields = []
     for a in atts:
         binding = a.get("binding", "")
         if "jts" in binding.lower() or "geom" in binding.lower():
             geometry = next((lbl for key, lbl in _GEOM_LABEL if key in binding),
                             "geometrie")
+            geom_col = a.get("name") or geom_col
         elif a.get("name"):
             fields.append(a["name"])
     count = None
@@ -340,8 +366,9 @@ async def _layer_info(workspace: str, name: str) -> dict | None:
             count = int(m.group(1))
     except (GeoServerError, ValueError):
         pass
-    return {"geometry": geometry, "fields": fields, "count": count,
-            "title": ft.get("title") or name, "abstract": ft.get("abstract") or ""}
+    return {"geometry": geometry, "geometry_column": geom_col, "fields": fields,
+            "count": count, "title": ft.get("title") or name,
+            "abstract": ft.get("abstract") or ""}
 
 
 @app.get("/api/config")
@@ -444,9 +471,14 @@ async def list_layers() -> list:
 
 
 @app.get("/api/bbox")
-async def layer_bbox(workspace: str, name: str) -> dict:
-    """Return a layer's lat/lon bounding box (for zoom-to-extent)."""
-    bbox = await featuretype_bbox(workspace, name)
+async def api_layer_bbox(workspace: str, name: str) -> dict:
+    """Return a layer's lat/lon bounding box (for zoom-to-extent).
+
+    NB the endpoint is deliberately NOT named ``layer_bbox`` — that would shadow
+    the imported :func:`mcp_geo_server.ingest.layer_bbox` helper at module scope
+    and make this call (and the one in ``/api/ask``) recurse infinitely.
+    """
+    bbox = await layer_bbox(workspace, name)
     if not bbox:
         raise HTTPException(status_code=404, detail="no bounding box for layer.")
     return bbox
@@ -467,26 +499,237 @@ def _filter_hints() -> str:
     """
     global _FILTER_HINTS
     if _FILTER_HINTS is None:
-        attrs: dict[str, list[tuple[str, str]]] = {}
-        for spec in _load_style_config().get("styles", {}).values():
+        cfg = _load_style_config()
+        styles = cfg.get("styles", {})
+        assign = cfg.get("assign", []) or []
+        attrs: dict[str, dict] = {}
+        style_attr: dict[str, str] = {}
+        for sname, spec in styles.items():
             attr, classes = spec.get("attribute"), spec.get("classes")
             if not (attr and classes):
                 continue
+            style_attr[sname] = attr
+            d = attrs.setdefault(attr, {"values": [], "patterns": set()})
             for c in classes:
                 pair = (str(c.get("value")), str(c.get("label", "")))
-                attrs.setdefault(attr, [])
-                if pair not in attrs[attr]:
-                    attrs[attr].append(pair)
+                if pair not in d["values"]:
+                    d["values"].append(pair)
+        # Attach the layer-name patterns (from the assign rules) each attribute
+        # lives on, so the resolver filters only layers that HAVE the attribute.
+        for rule in assign:
+            attr = style_attr.get(rule.get("style"))
+            pat = rule.get("name_contains") or rule.get("name_matches")
+            if attr and pat:
+                attrs[attr]["patterns"].add(str(pat))
         if not attrs:
             _FILTER_HINTS = ""
         else:
-            lines = ["Filterable attributes (use EXACT values in cql_filter):"]
-            for a, pairs in attrs.items():
+            lines = ["Filterable attributes — each exists ONLY on layers whose "
+                     "name matches the given pattern; to filter by it you MUST "
+                     "pick such a layer (use EXACT values in cql_filter):"]
+            for a, d in attrs.items():
                 vals = ", ".join(f"'{v}' ({lbl})" if lbl else f"'{v}'"
-                                 for v, lbl in pairs)
-                lines.append(f"- {a}: {vals}")
+                                 for v, lbl in d["values"])
+                pats = " | ".join(sorted(d["patterns"])) or "(any)"
+                lines.append(f"- {a} (layers matching: {pats}): {vals}")
             _FILTER_HINTS = "\n".join(lines)
     return _FILTER_HINTS
+
+
+# ---- admin-area (comune / provincia / regione) spatial scoping -----------
+# When a chat request names an administrative unit, zoom to it and CLIP the
+# rendered layers to its exact boundary. ISTAT boundary layers, most specific
+# first (a comune match beats a regione match). Workspace defaults to the
+# catalog workspace; override with GEO_ADMIN_WORKSPACE.
+_ADMIN_WS = (os.environ.get("GEO_ADMIN_WORKSPACE") or "").strip()
+_ADMIN_LEVELS = [
+    {"level": "comune",    "layer": "com01012023_g",    "attr": "comune"},
+    {"level": "provincia", "layer": "provcm01012023_g", "attr": "den_uts"},
+    {"level": "regione",   "layer": "reg01012023_g",    "attr": "den_reg"},
+]
+_ADMIN_INDEX: list[tuple[str, dict, str]] | None = None
+_ADMIN_SCOPE_CACHE: dict[tuple[str, str], dict | None] = {}
+
+
+def _admin_ws() -> str:
+    return _ADMIN_WS or (get_client().settings.default_workspace or "")
+
+
+def _demojibake(s: str) -> str:
+    """Repair classic double-encoded latin-1/UTF-8 text ('AgliÃ¨' -> 'Agliè').
+
+    Some boundary layers were loaded with the wrong encoding, so the DB holds
+    the mojibake. Used only for MATCHING against user text and for display — the
+    raw stored value is still used in the CQL filter that fetches the geometry.
+    """
+    try:
+        return s.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return s
+
+
+def _norm_admin(s: str) -> str:
+    """Accent/case/punctuation-insensitive key for matching place names."""
+    import unicodedata
+    s = _demojibake(s)
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+async def _admin_names(level: dict) -> list[str]:
+    """Raw stored names for one boundary layer (geometry excluded)."""
+    client = get_client()
+    try:
+        resp = await client.ows(
+            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+             "typeNames": f"{_admin_ws()}:{level['layer']}",
+             "propertyName": level["attr"], "count": "20000",
+             "outputFormat": "application/json"},
+            base=client.settings.wfs_base)
+        import json as _json
+        data = _json.loads(resp.text)
+        return [f.get("properties", {}).get(level["attr"])
+                for f in data.get("features", [])
+                if f.get("properties", {}).get(level["attr"])]
+    except (GeoServerError, ValueError):
+        return []
+
+
+async def _admin_index() -> list[tuple[str, dict, str]]:
+    """Build ``(normalized_name, level, raw_name)`` once (cached process-wide)."""
+    global _ADMIN_INDEX
+    if _ADMIN_INDEX is None:
+        idx: list[tuple[str, dict, str]] = []
+        for level in _ADMIN_LEVELS:
+            for raw in await _admin_names(level):
+                n = _norm_admin(raw)
+                if len(n) >= 3:  # skip 2-letter names (false-positive prone)
+                    idx.append((n, level, raw))
+        _ADMIN_INDEX = idx
+    return _ADMIN_INDEX
+
+
+# Level keywords in the query force that admin level (e.g. 'provincia di Bari'
+# should scope to the province, not the comune that shares the name).
+_LEVEL_HINTS = {
+    "regione": "regione", "regionale": "regione",
+    "provincia": "provincia", "provincie": "provincia", "prov": "provincia",
+    "metropolitana": "provincia",  # 'città metropolitana di ...'
+    "comune": "comune",
+}
+
+
+def _level_hint(q_norm: str) -> str | None:
+    """The admin level explicitly named in the (normalized) query, if any."""
+    tokens = set(q_norm.split())
+    for kw, lvl in _LEVEL_HINTS.items():
+        if kw in tokens:
+            return lvl
+    return None
+
+
+async def _detect_admin(query: str) -> tuple[dict, str] | None:
+    """The admin unit named in the query, if any.
+
+    Matches whole normalized phrases (space-padded) so 'regione' won't spuriously
+    match a 2-letter comune. If the query names a level ('provincia di Bari'),
+    that level wins; otherwise the most specific (then longest) match wins.
+    """
+    q_norm = _norm_admin(query)
+    q = f" {q_norm} "
+    hint = _level_hint(q_norm)
+    order = {lvl["level"]: i for i, lvl in enumerate(_ADMIN_LEVELS)}
+    best: tuple[dict, str] | None = None
+    best_key = (99, 99, 0)
+    for n, level, raw in await _admin_index():
+        if f" {n} " in q:
+            lvl = level["level"]
+            # 0 if it matches the level the user named, else 1 (hint wins).
+            hint_rank = 0 if (hint and lvl == hint) else 1
+            # Then the LONGEST phrase match (a fuller name like "valle d aosta"
+            # beats the substring "aosta"), then the most specific level.
+            key = (hint_rank, -len(n), order[lvl])
+            if key < best_key:
+                best_key, best = key, (level, raw)
+    return best
+
+
+async def _admin_scope(level: dict, raw_name: str) -> dict | None:
+    """Zoom bbox + clip WKT (EPSG:4326) for one admin unit. Cached."""
+    ck = (level["layer"], raw_name)
+    if ck in _ADMIN_SCOPE_CACHE:
+        return _ADMIN_SCOPE_CACHE[ck]
+    client = get_client()
+    scope = None
+    try:
+        cql = f"{level['attr']}='{raw_name.replace(chr(39), chr(39) * 2)}'"
+        resp = await client.ows(
+            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+             "typeNames": f"{_admin_ws()}:{level['layer']}", "cql_filter": cql,
+             "count": "1", "srsName": "EPSG:4326",
+             "outputFormat": "application/json"},
+            base=client.settings.wfs_base)
+        import json as _json
+        feats = _json.loads(resp.text).get("features", [])
+        geom_json = feats[0].get("geometry") if feats else None
+        if geom_json:
+            import shapely
+            from shapely.geometry import shape
+            geom = shape(geom_json)
+            minx, miny, maxx, maxy = geom.bounds
+
+            def _clip_wkt(g):
+                # Simplify to fit the WMS tile GET URL (Tomcat caps the request
+                # line at ~8 KB), then SNAP coordinates to a grid: raw simplified
+                # vertices carry FP noise (differing at the 15th decimal) that
+                # makes JTS throw "non-noded intersection" when GeoServer clips a
+                # vector layer. Snapping + make_valid removes those slivers.
+                g = shapely.set_precision(g, 1e-6)
+                if not g.is_valid:
+                    g = g.buffer(0)
+                return g.wkt
+
+            tol = 0.001
+            wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
+            while len(wkt) > 3500 and tol < 1:
+                tol *= 2
+                wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
+            scope = {
+                "level": level["level"],
+                "name": _demojibake(raw_name),
+                "bbox": {"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy},
+                "clip": f"SRID=4326;{wkt}",
+            }
+    except Exception:  # noqa: BLE001 — scoping is best-effort, never fail the ask
+        scope = None
+    _ADMIN_SCOPE_CACHE[ck] = scope
+    return scope
+
+
+# Terrain-metric intent: words that mean the user wants a DTM-derived metric
+# computed on the selected vector features (quota/slope/aspect/curvature).
+_METRIC_HINTS = {
+    "quota": "quota", "quote": "quota", "altimetria": "quota",
+    "altitudine": "quota", "elevazione": "quota", "altezza": "quota",
+    "pendenza": "slope", "pendenze": "slope", "acclivita": "slope",
+    "slope": "slope",
+    "esposizione": "aspect", "orientamento": "aspect", "aspect": "aspect",
+    "curvatura": "curvature", "curvature": "curvature",
+}
+
+
+def _metric_intent(query: str) -> list[str]:
+    """Terrain metrics named in the query (normalized, accent-insensitive)."""
+    toks = set(_norm_admin(query).split())
+    return sorted({v for k, v in _METRIC_HINTS.items() if k in toks})
+
+
+def _cql_attributes(cql: str) -> set[str]:
+    """Attribute names referenced by a CQL filter (identifiers before an op)."""
+    return set(re.findall(
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|<>|!=|<=|>=|<|>|\bLIKE\b|\bILIKE\b|"
+        r"\bIN\b|\bBETWEEN\b|\bIS\b)", cql, re.I))
 
 
 @app.post("/api/ask")
@@ -516,12 +759,13 @@ async def ask(body: AskIn) -> dict:
 
     # Zoom to the combined extent of the selected layers (skip degenerate boxes —
     # empty layers report (0,0,0,0), which would drag the extent to the sea).
-    boxes = []
+    bbox_by_q: dict[str, dict] = {}
     for qualified in selection["layers"]:
         ws, _, name = qualified.partition(":")
-        bbox = await featuretype_bbox(ws, name)
+        bbox = await layer_bbox(ws, name)
         if bbox and bbox["maxx"] > bbox["minx"] and bbox["maxy"] > bbox["miny"]:
-            boxes.append(bbox)
+            bbox_by_q[qualified] = bbox
+    boxes = list(bbox_by_q.values())
     combined = None
     if boxes:
         combined = {
@@ -533,14 +777,147 @@ async def ask(body: AskIn) -> dict:
     selection["bbox"] = combined
 
     # Describe the data type of each selected layer (geometry, count, fields).
+    # The per-layer bbox is attached so the UI can order overlapping rasters by
+    # footprint (broadest at the bottom).
     info = []
     for qualified in selection["layers"]:
         ws, _, name = qualified.partition(":")
         li = await _layer_info(ws, name)
         if li:
-            info.append({"qualified": qualified, **li})
-    selection["info"] = info
+            kind = "raster" if li.get("geometry") == "raster" else "vector"
+            info.append({"qualified": qualified, "kind": kind,
+                         "bbox": bbox_by_q.get(qualified), **li})
+
+    # Server-side draw order (bottom -> top) so ANY map client can just render
+    # `layers` in the given order — the stacking policy lives here, not in the
+    # UI: rasters below all vectors (an opaque raster must not hide them), and
+    # among rasters the broadest footprint sits at the bottom (a smaller/local
+    # raster stays visible over a national one). Stable within each group.
+    info_by_q = {e["qualified"]: e for e in info}
+
+    def _order_key(qualified: str) -> tuple:
+        e = info_by_q.get(qualified, {})
+        b = e.get("bbox")
+        area = (b["maxx"] - b["minx"]) * (b["maxy"] - b["miny"]) if b else 0.0
+        is_raster = e.get("kind") == "raster"
+        return (0 if is_raster else 1, -area if is_raster else 0.0)
+
+    selection["layers"] = sorted(selection["layers"], key=_order_key)
+    selection["info"] = sorted(info, key=lambda e: _order_key(e["qualified"]))
+
+    # Per-layer CQL applicability: a single cql_filter can only apply to layers
+    # that actually have the referenced attribute(s). Applying it to a layer
+    # that lacks the column makes GeoServer fail the ENTIRE render (that is why
+    # "pericolosità elevata" over a landslide-inventory layer showed nothing).
+    # The server decides, per layer, whether the filter applies.
+    cql = selection.get("cql_filter")
+    cql_by_layer: dict[str, str] = {}
+    if cql:
+        attrs = _cql_attributes(cql)
+        for e in info:
+            fields = set(e.get("fields") or [])
+            if attrs and attrs <= fields:
+                cql_by_layer[e["qualified"]] = cql
+    selection["cql_applicable"] = bool(cql_by_layer) if cql else None
+
+    # Admin-area scoping: if the request names a comune/provincia/regione, zoom
+    # to that unit and restrict the layers to its boundary. RASTERS use the exact
+    # polygon `clip` (robust on coverages). VECTORS use a CQL INTERSECTS spatial
+    # filter instead — a predicate (no geometry overlay), so it avoids the JTS
+    # "non-noded intersection" crash that `clip` triggers on dense/imperfect
+    # vector layers (e.g. the ~900k-polygon PAI mosaic).
+    admin = await _detect_admin(query)
+    if admin:
+        scope = await _admin_scope(*admin)
+        if scope:
+            selection["admin"] = {"level": scope["level"], "name": scope["name"]}
+            selection["bbox"] = scope["bbox"]   # override: zoom to the unit
+            selection["clip"] = scope["clip"]   # client applies it to RASTERS
+            wkt = scope["clip"].split(";", 1)[-1]  # bare WKT for CQL
+            for e in info:
+                if e.get("kind") != "vector":
+                    continue
+                q = e["qualified"]
+                gcol = e.get("geometry_column") or "geom"
+                spatial = f"INTERSECTS({gcol}, {wkt})"
+                base = cql_by_layer.get(q)
+                cql_by_layer[q] = f"({base}) AND {spatial}" if base else spatial
+    selection["cql_by_layer"] = cql_by_layer
+
+    # Terrain enrichment: if the request names a metric (quota/slope/aspect/
+    # curvature), compute it on the selected VECTOR layers by sampling a DTM,
+    # bounded to the current area. The raster is the sampling source (a DTM in
+    # the selection, else auto-picked). Best-effort — never fails the ask.
+    wanted_metrics = _metric_intent(query)
+    vector_layers = [i["qualified"] for i in info if i.get("kind") == "vector"]
+    if wanted_metrics and vector_layers:
+        from mcp_geo_server import enrich as _enrich
+        dtm_layers = [i["qualified"] for i in info if i.get("kind") == "raster"]
+        dtm = dtm_layers[0] if dtm_layers else None
+        b = selection.get("bbox")
+        bbox_str = (f'{b["minx"]},{b["miny"]},{b["maxx"]},{b["maxy"]}'
+                    if b else None)
+        labels = {m: _enrich.METRICS.get(m, m) for m in wanted_metrics}
+        enriched = []
+        for vl in vector_layers[:3]:
+            try:
+                r = await _enrich.enrich_layer(vl, metrics=wanted_metrics,
+                                               dtm=dtm, bbox=bbox_str, limit=1000)
+                if not r.get("count"):
+                    continue
+                # Build a display-ready sentence server-side so any client can
+                # just print it (no client-side formatting of the stats).
+                parts = []
+                for m in wanted_metrics:
+                    s = r["summary"].get(m)
+                    if s:
+                        parts.append(f'{labels[m]} media {s["mean"]} '
+                                     f'(min {s["min"]}, max {s["max"]})')
+                text = (f'{vl.split(":")[-1]} — {r["count"]} elementi: '
+                        + "; ".join(parts))
+                enriched.append({"layer": vl, "count": r["count"],
+                                 "summary": r["summary"], "text": text})
+            except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+                print(f"enrichment skipped for {vl}: {exc}")  # webui logs
+        if enriched:
+            title = "Analisi del terreno (DTM)"
+            selection["enrichment"] = {
+                "metrics": wanted_metrics, "labels": labels, "title": title,
+                "layers": enriched,
+                "text": title + ":\n" + "\n".join(f"· {e['text']}"
+                                                   for e in enriched),
+            }
     return selection
+
+
+# ---- terrain enrichment from a DTM (generic, on-demand) ------------------
+class EnrichIn(BaseModel):
+    layer: str                       # qualified vector layer to enrich
+    dtm: str | None = None           # qualified DTM coverage (auto-picked if None)
+    metrics: list[str] | None = None  # subset of quota/slope/aspect/curvature
+    bbox: str | None = None          # optional "minx,miny,maxx,maxy" (EPSG:4326)
+    limit: int = 500
+
+
+@app.post("/api/enrich")
+async def enrich_endpoint(body: EnrichIn) -> dict:
+    """Enrich a vector layer's features with DTM terrain metrics (on-demand).
+
+    Generic: works for any point/line/polygon layer and any DTM published as a
+    coverage. Returns per-feature metrics + a dataset-level summary; writes
+    nothing. Restrict the work with ``bbox`` and ``limit`` for large layers.
+    Shares its core with the ``geo_enrich_from_dtm`` MCP tool.
+    """
+    from mcp_geo_server import enrich as _enrich
+    try:
+        return await _enrich.enrich_layer(
+            body.layer, metrics=body.metrics, dtm=body.dtm,
+            bbox=body.bbox, limit=body.limit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — surface enrichment errors
+        raise HTTPException(status_code=400,
+                            detail=f"enrichment failed: {exc}") from exc
 
 
 @app.get("/")
