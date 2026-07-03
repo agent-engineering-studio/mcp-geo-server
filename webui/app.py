@@ -673,6 +673,24 @@ async def _admin_scope(level: dict, raw_name: str) -> dict | None:
     return scope
 
 
+# Terrain-metric intent: words that mean the user wants a DTM-derived metric
+# computed on the selected vector features (quota/slope/aspect/curvature).
+_METRIC_HINTS = {
+    "quota": "quota", "quote": "quota", "altimetria": "quota",
+    "altitudine": "quota", "elevazione": "quota", "altezza": "quota",
+    "pendenza": "slope", "pendenze": "slope", "acclivita": "slope",
+    "slope": "slope",
+    "esposizione": "aspect", "orientamento": "aspect", "aspect": "aspect",
+    "curvatura": "curvature", "curvature": "curvature",
+}
+
+
+def _metric_intent(query: str) -> list[str]:
+    """Terrain metrics named in the query (normalized, accent-insensitive)."""
+    toks = set(_norm_admin(query).split())
+    return sorted({v for k, v in _METRIC_HINTS.items() if k in toks})
+
+
 @app.post("/api/ask")
 async def ask(body: AskIn) -> dict:
     """Map a natural-language request to layers via the LLM resolver.
@@ -756,6 +774,50 @@ async def ask(body: AskIn) -> dict:
             selection["admin"] = {"level": scope["level"], "name": scope["name"]}
             selection["bbox"] = scope["bbox"]   # override: zoom to the unit
             selection["clip"] = scope["clip"]   # frontend passes to the WMS
+
+    # Terrain enrichment: if the request names a metric (quota/slope/aspect/
+    # curvature), compute it on the selected VECTOR layers by sampling a DTM,
+    # bounded to the current area. The raster is the sampling source (a DTM in
+    # the selection, else auto-picked). Best-effort — never fails the ask.
+    wanted_metrics = _metric_intent(query)
+    vector_layers = [i["qualified"] for i in info if i.get("kind") == "vector"]
+    if wanted_metrics and vector_layers:
+        from mcp_geo_server import enrich as _enrich
+        dtm_layers = [i["qualified"] for i in info if i.get("kind") == "raster"]
+        dtm = dtm_layers[0] if dtm_layers else None
+        b = selection.get("bbox")
+        bbox_str = (f'{b["minx"]},{b["miny"]},{b["maxx"]},{b["maxy"]}'
+                    if b else None)
+        labels = {m: _enrich.METRICS.get(m, m) for m in wanted_metrics}
+        enriched = []
+        for vl in vector_layers[:3]:
+            try:
+                r = await _enrich.enrich_layer(vl, metrics=wanted_metrics,
+                                               dtm=dtm, bbox=bbox_str, limit=1000)
+                if not r.get("count"):
+                    continue
+                # Build a display-ready sentence server-side so any client can
+                # just print it (no client-side formatting of the stats).
+                parts = []
+                for m in wanted_metrics:
+                    s = r["summary"].get(m)
+                    if s:
+                        parts.append(f'{labels[m]} media {s["mean"]} '
+                                     f'(min {s["min"]}, max {s["max"]})')
+                text = (f'{vl.split(":")[-1]} — {r["count"]} elementi: '
+                        + "; ".join(parts))
+                enriched.append({"layer": vl, "count": r["count"],
+                                 "summary": r["summary"], "text": text})
+            except Exception as exc:  # noqa: BLE001 — enrichment is best-effort
+                print(f"enrichment skipped for {vl}: {exc}")  # webui logs
+        if enriched:
+            title = "Analisi del terreno (DTM)"
+            selection["enrichment"] = {
+                "metrics": wanted_metrics, "labels": labels, "title": title,
+                "layers": enriched,
+                "text": title + ":\n" + "\n".join(f"· {e['text']}"
+                                                   for e in enriched),
+            }
     return selection
 
 

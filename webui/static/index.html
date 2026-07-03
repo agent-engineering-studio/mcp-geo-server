@@ -211,6 +211,12 @@
           else if (empty.length)
             html += `<div class="layers"><small>Nota: ${empty.length} altro/i layer non contiene dati per quest'area e non è stato mostrato.</small></div>`;
           if (r.cql_filter) html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
+          // Terrain enrichment: the server returns a display-ready `text`
+          // (title + per-layer sentence), so we just print it.
+          if (r.enrichment && r.enrichment.text) {
+            const lines = r.enrichment.text.split("\n").map(escapeHtml);
+            html += `<div class="layers"><b>${lines[0]}</b><br>${lines.slice(1).join("<br>")}</div>`;
+          }
           thinking.innerHTML = html;
           thinking.title = r.layers.join(", ");  // technical names on hover only
         }
