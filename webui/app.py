@@ -75,8 +75,17 @@ _RESOLVER_INSTRUCTIONS = (
     'language>"}\n'
     "Rules:\n"
     "- pick ONLY names that appear verbatim in the catalog; match the request "
-    "against each layer's name, title and keywords; prefer the most specific "
-    "layers; if ambiguous include the few best matches.\n"
+    "against each layer's SUBJECT (its name, title and keywords).\n"
+    "- A place name (region/province/comune, e.g. \"Valle d'Aosta\", \"Bari\") "
+    "only restricts the AREA shown — the area clip is applied automatically "
+    "afterwards. Use the place to choose a layer ONLY when the requested subject "
+    "has per-place variants (e.g. landslide layers exist per region); otherwise "
+    "ignore the place when selecting. NEVER add a layer of a DIFFERENT subject "
+    "just because its name contains the place. Example: \"DTM della Valle "
+    "d'Aosta\" -> the DTM / elevation layer ONLY (subject = DTM), NOT the "
+    "landslide layers of Valle d'Aosta.\n"
+    "- return as FEW layers as possible — only those whose subject was asked "
+    "for; include several only when the request is genuinely ambiguous.\n"
     "- cql_filter: when the user asks for a SUBSET by an attribute value (e.g. "
     "'alta/elevata pericolosità'), build a CQL using ONLY the attributes and "
     "EXACT values listed under 'Filterable attributes'; otherwise null. Never "
@@ -615,7 +624,9 @@ async def _detect_admin(query: str) -> tuple[dict, str] | None:
             lvl = level["level"]
             # 0 if it matches the level the user named, else 1 (hint wins).
             hint_rank = 0 if (hint and lvl == hint) else 1
-            key = (hint_rank, order[lvl], -len(n))
+            # Then the LONGEST phrase match (a fuller name like "valle d aosta"
+            # beats the substring "aosta"), then the most specific level.
+            key = (hint_rank, -len(n), order[lvl])
             if key < best_key:
                 best_key, best = key, (level, raw)
     return best
