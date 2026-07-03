@@ -689,12 +689,13 @@ async def ask(body: AskIn) -> dict:
 
     # Zoom to the combined extent of the selected layers (skip degenerate boxes —
     # empty layers report (0,0,0,0), which would drag the extent to the sea).
-    boxes = []
+    bbox_by_q: dict[str, dict] = {}
     for qualified in selection["layers"]:
         ws, _, name = qualified.partition(":")
         bbox = await layer_bbox(ws, name)
         if bbox and bbox["maxx"] > bbox["minx"] and bbox["maxy"] > bbox["miny"]:
-            boxes.append(bbox)
+            bbox_by_q[qualified] = bbox
+    boxes = list(bbox_by_q.values())
     combined = None
     if boxes:
         combined = {
@@ -706,13 +707,33 @@ async def ask(body: AskIn) -> dict:
     selection["bbox"] = combined
 
     # Describe the data type of each selected layer (geometry, count, fields).
+    # The per-layer bbox is attached so the UI can order overlapping rasters by
+    # footprint (broadest at the bottom).
     info = []
     for qualified in selection["layers"]:
         ws, _, name = qualified.partition(":")
         li = await _layer_info(ws, name)
         if li:
-            info.append({"qualified": qualified, **li})
-    selection["info"] = info
+            kind = "raster" if li.get("geometry") == "raster" else "vector"
+            info.append({"qualified": qualified, "kind": kind,
+                         "bbox": bbox_by_q.get(qualified), **li})
+
+    # Server-side draw order (bottom -> top) so ANY map client can just render
+    # `layers` in the given order — the stacking policy lives here, not in the
+    # UI: rasters below all vectors (an opaque raster must not hide them), and
+    # among rasters the broadest footprint sits at the bottom (a smaller/local
+    # raster stays visible over a national one). Stable within each group.
+    info_by_q = {e["qualified"]: e for e in info}
+
+    def _order_key(qualified: str) -> tuple:
+        e = info_by_q.get(qualified, {})
+        b = e.get("bbox")
+        area = (b["maxx"] - b["minx"]) * (b["maxy"] - b["miny"]) if b else 0.0
+        is_raster = e.get("kind") == "raster"
+        return (0 if is_raster else 1, -area if is_raster else 0.0)
+
+    selection["layers"] = sorted(selection["layers"], key=_order_key)
+    selection["info"] = sorted(info, key=lambda e: _order_key(e["qualified"]))
 
     # Admin-area scoping: if the request names a comune/provincia/regione, zoom
     # to that unit and clip the rendered layers to its exact boundary (so e.g.

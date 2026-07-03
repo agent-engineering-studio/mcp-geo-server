@@ -111,7 +111,7 @@
       Object.values(wmsLayers).forEach(l => map.removeLayer(l));
       Object.keys(wmsLayers).forEach(k => delete wmsLayers[k]);
     }
-    function addWmsQualified(qualified, cql, clip) {
+    function addWmsQualified(qualified, cql, clip, zIndex) {
       // Larger tiles + update-when-idle reduce the burst of concurrent tile
       // requests (which GeoServer can transiently throttle with 429).
       const params = { layers: qualified, format: "image/png", transparent: true,
@@ -121,6 +121,9 @@
       // GeoServer clips the rendered output to that polygon, reprojecting from
       // 4326 to the tile CRS. Leaflet URL-encodes it into the tile requests.
       if (clip) params.clip = clip;
+      // Explicit stacking: rasters get a low zIndex (drawn at the bottom),
+      // vectors a higher one, so an opaque raster never hides the vectors.
+      if (zIndex != null) params.zIndex = zIndex;
       wmsLayers[qualified] = L.tileLayer.wms(CONFIG.wms_base, params).addTo(map);
     }
     function zoomToBbox(b) {
@@ -182,7 +185,11 @@
           const empty = r.layers.filter(l => info[l] && info[l].count === 0);
 
           clearWms();
-          populated.forEach(l => addWmsQualified(l, r.cql_filter, r.clip));
+          // The server returns `layers` already in draw order (bottom -> top):
+          // rasters below vectors, broadest raster lowest. We just render in
+          // that order; zIndex mirrors it so the stacking is explicit. (populated
+          // is r.layers filtered, so it preserves the server order.)
+          populated.forEach((l, i) => addWmsQualified(l, r.cql_filter, r.clip, 300 + i));
           zoomToBbox(r.bbox);
           renderLegend();
 
