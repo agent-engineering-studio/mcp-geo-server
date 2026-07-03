@@ -189,7 +189,14 @@
           // rasters below vectors, broadest raster lowest. We just render in
           // that order; zIndex mirrors it so the stacking is explicit. (populated
           // is r.layers filtered, so it preserves the server order.)
-          populated.forEach((l, i) => addWmsQualified(l, r.cql_filter, r.clip, 300 + i));
+          // Per-layer CQL from the server (attribute filter + region INTERSECTS
+          // for vectors). The polygon `clip` is applied only to RASTERS —
+          // vectors are bounded by their INTERSECTS filter (robust; no overlay).
+          const cqlFor = r.cql_by_layer || {};
+          populated.forEach((l, i) => {
+            const isRaster = info[l] && info[l].kind === "raster";
+            addWmsQualified(l, cqlFor[l] || null, isRaster ? r.clip : null, 300 + i);
+          });
           zoomToBbox(r.bbox);
           renderLegend();
 
@@ -210,7 +217,12 @@
             html += `<div class="layers">Per quest'area non sono presenti dati da mostrare sulla mappa.</div>`;
           else if (empty.length)
             html += `<div class="layers"><small>Nota: ${empty.length} altro/i layer non contiene dati per quest'area e non è stato mostrato.</small></div>`;
-          if (r.cql_filter) html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
+          if (r.cql_filter) {
+            if (r.cql_applicable)
+              html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
+            else
+              html += `<div class="layers"><small>Filtro «${escapeHtml(r.cql_filter)}» non applicabile ai layer selezionati (attributo assente): mostro i dati non filtrati.</small></div>`;
+          }
           // Terrain enrichment: the server returns a display-ready `text`
           // (title + per-layer sentence), so we just print it.
           if (r.enrichment && r.enrichment.text) {

@@ -89,7 +89,12 @@ _RESOLVER_INSTRUCTIONS = (
     "- cql_filter: when the user asks for a SUBSET by an attribute value (e.g. "
     "'alta/elevata pericolosità'), build a CQL using ONLY the attributes and "
     "EXACT values listed under 'Filterable attributes'; otherwise null. Never "
-    "invent layer, column or value names."
+    "invent layer, column or value names.\n"
+    "- an attribute exists ONLY on the layers matching its pattern in "
+    "'Filterable attributes'. If you build a cql_filter on an attribute, you "
+    "MUST select a layer whose name matches that attribute's pattern — e.g. a "
+    "hazard-class filter goes on the hazard layer, NOT on a landslide-inventory "
+    "layer that lacks that column."
 )
 
 
@@ -340,12 +345,14 @@ async def _layer_info(workspace: str, name: str) -> dict | None:
                 "abstract": cov.get("abstract") or ""}
     ft = data.get("featureType", {}) if isinstance(data, dict) else {}
     atts = ft.get("attributes", {}).get("attribute", []) or []
-    geometry, fields = None, []
+    geometry, geom_col, fields = None, None, None
+    fields = []
     for a in atts:
         binding = a.get("binding", "")
         if "jts" in binding.lower() or "geom" in binding.lower():
             geometry = next((lbl for key, lbl in _GEOM_LABEL if key in binding),
                             "geometrie")
+            geom_col = a.get("name") or geom_col
         elif a.get("name"):
             fields.append(a["name"])
     count = None
@@ -359,8 +366,9 @@ async def _layer_info(workspace: str, name: str) -> dict | None:
             count = int(m.group(1))
     except (GeoServerError, ValueError):
         pass
-    return {"geometry": geometry, "fields": fields, "count": count,
-            "title": ft.get("title") or name, "abstract": ft.get("abstract") or ""}
+    return {"geometry": geometry, "geometry_column": geom_col, "fields": fields,
+            "count": count, "title": ft.get("title") or name,
+            "abstract": ft.get("abstract") or ""}
 
 
 @app.get("/api/config")
@@ -491,24 +499,39 @@ def _filter_hints() -> str:
     """
     global _FILTER_HINTS
     if _FILTER_HINTS is None:
-        attrs: dict[str, list[tuple[str, str]]] = {}
-        for spec in _load_style_config().get("styles", {}).values():
+        cfg = _load_style_config()
+        styles = cfg.get("styles", {})
+        assign = cfg.get("assign", []) or []
+        attrs: dict[str, dict] = {}
+        style_attr: dict[str, str] = {}
+        for sname, spec in styles.items():
             attr, classes = spec.get("attribute"), spec.get("classes")
             if not (attr and classes):
                 continue
+            style_attr[sname] = attr
+            d = attrs.setdefault(attr, {"values": [], "patterns": set()})
             for c in classes:
                 pair = (str(c.get("value")), str(c.get("label", "")))
-                attrs.setdefault(attr, [])
-                if pair not in attrs[attr]:
-                    attrs[attr].append(pair)
+                if pair not in d["values"]:
+                    d["values"].append(pair)
+        # Attach the layer-name patterns (from the assign rules) each attribute
+        # lives on, so the resolver filters only layers that HAVE the attribute.
+        for rule in assign:
+            attr = style_attr.get(rule.get("style"))
+            pat = rule.get("name_contains") or rule.get("name_matches")
+            if attr and pat:
+                attrs[attr]["patterns"].add(str(pat))
         if not attrs:
             _FILTER_HINTS = ""
         else:
-            lines = ["Filterable attributes (use EXACT values in cql_filter):"]
-            for a, pairs in attrs.items():
+            lines = ["Filterable attributes — each exists ONLY on layers whose "
+                     "name matches the given pattern; to filter by it you MUST "
+                     "pick such a layer (use EXACT values in cql_filter):"]
+            for a, d in attrs.items():
                 vals = ", ".join(f"'{v}' ({lbl})" if lbl else f"'{v}'"
-                                 for v, lbl in pairs)
-                lines.append(f"- {a}: {vals}")
+                                 for v, lbl in d["values"])
+                pats = " | ".join(sorted(d["patterns"])) or "(any)"
+                lines.append(f"- {a} (layers matching: {pats}): {vals}")
             _FILTER_HINTS = "\n".join(lines)
     return _FILTER_HINTS
 
@@ -651,16 +674,27 @@ async def _admin_scope(level: dict, raw_name: str) -> dict | None:
         feats = _json.loads(resp.text).get("features", [])
         geom_json = feats[0].get("geometry") if feats else None
         if geom_json:
+            import shapely
             from shapely.geometry import shape
             geom = shape(geom_json)
             minx, miny, maxx, maxy = geom.bounds
-            # Simplify enough that the clip WKT fits in the WMS tile GET URL
-            # (Tomcat caps the request line at ~8 KB).
+
+            def _clip_wkt(g):
+                # Simplify to fit the WMS tile GET URL (Tomcat caps the request
+                # line at ~8 KB), then SNAP coordinates to a grid: raw simplified
+                # vertices carry FP noise (differing at the 15th decimal) that
+                # makes JTS throw "non-noded intersection" when GeoServer clips a
+                # vector layer. Snapping + make_valid removes those slivers.
+                g = shapely.set_precision(g, 1e-6)
+                if not g.is_valid:
+                    g = g.buffer(0)
+                return g.wkt
+
             tol = 0.001
-            wkt = geom.simplify(tol, preserve_topology=True).wkt
+            wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
             while len(wkt) > 3500 and tol < 1:
                 tol *= 2
-                wkt = geom.simplify(tol, preserve_topology=True).wkt
+                wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
             scope = {
                 "level": level["level"],
                 "name": _demojibake(raw_name),
@@ -689,6 +723,13 @@ def _metric_intent(query: str) -> list[str]:
     """Terrain metrics named in the query (normalized, accent-insensitive)."""
     toks = set(_norm_admin(query).split())
     return sorted({v for k, v in _METRIC_HINTS.items() if k in toks})
+
+
+def _cql_attributes(cql: str) -> set[str]:
+    """Attribute names referenced by a CQL filter (identifiers before an op)."""
+    return set(re.findall(
+        r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|<>|!=|<=|>=|<|>|\bLIKE\b|\bILIKE\b|"
+        r"\bIN\b|\bBETWEEN\b|\bIS\b)", cql, re.I))
 
 
 @app.post("/api/ask")
@@ -764,16 +805,44 @@ async def ask(body: AskIn) -> dict:
     selection["layers"] = sorted(selection["layers"], key=_order_key)
     selection["info"] = sorted(info, key=lambda e: _order_key(e["qualified"]))
 
+    # Per-layer CQL applicability: a single cql_filter can only apply to layers
+    # that actually have the referenced attribute(s). Applying it to a layer
+    # that lacks the column makes GeoServer fail the ENTIRE render (that is why
+    # "pericolosità elevata" over a landslide-inventory layer showed nothing).
+    # The server decides, per layer, whether the filter applies.
+    cql = selection.get("cql_filter")
+    cql_by_layer: dict[str, str] = {}
+    if cql:
+        attrs = _cql_attributes(cql)
+        for e in info:
+            fields = set(e.get("fields") or [])
+            if attrs and attrs <= fields:
+                cql_by_layer[e["qualified"]] = cql
+    selection["cql_applicable"] = bool(cql_by_layer) if cql else None
+
     # Admin-area scoping: if the request names a comune/provincia/regione, zoom
-    # to that unit and clip the rendered layers to its exact boundary (so e.g.
-    # "il DTM della Puglia" shows only Puglia, not the whole national raster).
+    # to that unit and restrict the layers to its boundary. RASTERS use the exact
+    # polygon `clip` (robust on coverages). VECTORS use a CQL INTERSECTS spatial
+    # filter instead — a predicate (no geometry overlay), so it avoids the JTS
+    # "non-noded intersection" crash that `clip` triggers on dense/imperfect
+    # vector layers (e.g. the ~900k-polygon PAI mosaic).
     admin = await _detect_admin(query)
     if admin:
         scope = await _admin_scope(*admin)
         if scope:
             selection["admin"] = {"level": scope["level"], "name": scope["name"]}
             selection["bbox"] = scope["bbox"]   # override: zoom to the unit
-            selection["clip"] = scope["clip"]   # frontend passes to the WMS
+            selection["clip"] = scope["clip"]   # client applies it to RASTERS
+            wkt = scope["clip"].split(";", 1)[-1]  # bare WKT for CQL
+            for e in info:
+                if e.get("kind") != "vector":
+                    continue
+                q = e["qualified"]
+                gcol = e.get("geometry_column") or "geom"
+                spatial = f"INTERSECTS({gcol}, {wkt})"
+                base = cql_by_layer.get(q)
+                cql_by_layer[q] = f"({base}) AND {spatial}" if base else spatial
+    selection["cql_by_layer"] = cql_by_layer
 
     # Terrain enrichment: if the request names a metric (quota/slope/aspect/
     # curvature), compute it on the selected VECTOR layers by sampling a DTM,

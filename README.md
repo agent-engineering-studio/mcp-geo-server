@@ -183,9 +183,27 @@ restyle for another domain, edit `data/styles.yml` and run `make styles`.
    the request against that metadata and returns the exact layer name(s), an
    optional `cql_filter`, and a short explanation. Hallucinated names are
    dropped against the catalog.
-3. Filterable attributes (with their allowed values) are derived from the style
-   config and passed to the resolver, so it can build a CQL on real values
-   (e.g. `per_fr_ita = 'Elevata P3'` for *"alta pericolosità"*).
+3. Filterable attributes (with their allowed values **and the layers they live
+   on**) are derived from the style config and passed to the resolver, so it
+   builds a CQL on real values and picks a layer that actually has the attribute
+   (e.g. `per_fr_ita = 'Elevata P3'` for *"alta pericolosità"* → the hazard
+   layer, not a landslide-inventory one).
+
+The server does the rest — the response is ready for any map client:
+
+- **Draw order** — `layers` come back bottom→top (rasters below vectors;
+  broadest raster lowest) with a `kind` per layer, so an opaque raster never
+  hides the vectors.
+- **Admin-area scoping** — if the request names a *comune / provincia / regione*
+  (ISTAT boundary layers), the response carries the zoom `bbox` and, per layer,
+  the way to restrict it to that area: rasters get an exact-polygon `clip`,
+  vectors get a CQL `INTERSECTS` spatial filter (a robust predicate — no
+  geometry overlay, so no JTS *non-noded intersection* failure on dense layers).
+- **Per-layer CQL** — `cql_by_layer` only applies a filter to layers that have
+  the attribute, so one filter can't fail the whole render.
+- **Terrain enrichment** — if the request names a metric (quota / slope / aspect
+  / curvature), the selected vector layers are enriched from a DTM
+  (`geo_enrich_from_dtm`) and a ready-to-show summary is returned.
 
 Because it relies on GeoServer metadata + config, it works for **any** GeoServer
 — just publish layers with meaningful titles/keywords (and, optionally, your own
