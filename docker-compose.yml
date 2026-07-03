@@ -11,7 +11,9 @@ services:
       POSTGRES_USER: gis
       POSTGRES_PASSWORD: gis
     ports:
-      - "5432:5432"
+      # Host port configurable so the stack can coexist with another Postgres
+      # (e.g. a second project) — set POSTGIS_HOST_PORT in .env to avoid clashes.
+      - "${POSTGIS_HOST_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -37,7 +39,9 @@ services:
       # Let the browser-based test UI call the OGC services directly.
       CORS_ENABLED: "true"
     ports:
-      - "8080:8080"
+      # Configurable host port so this stack can run alongside another GeoServer
+      # — set GEOSERVER_HOST_PORT in .env to avoid a clash (container stays 8080).
+      - "${GEOSERVER_HOST_PORT:-8080}:8080"
     volumes:
       - gsdata:${GEOSERVER_DATA_DIR:-/opt/geoserver/data_dir}
       # Raster data (GeoTIFF / DTM) is registered as EXTERNAL coverage stores
@@ -123,7 +127,7 @@ services:
     # Override the bootstrap stage CMD: serve the FastAPI UI instead.
     # NOTE: $$ escapes compose interpolation so the CONTAINER shell expands
     # WEBUI_PORT at runtime (not docker compose at parse time).
-    command: ["sh", "-c", "uvicorn webui.app:app --host 0.0.0.0 --port $${WEBUI_PORT}"]
+    command: ["sh", "-c", "uvicorn webui.app:app --host 0.0.0.0 --port 8000"]
     depends_on:
       geoserver:
         condition: service_started
@@ -157,7 +161,9 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
     ports:
-      - "8000:8000"
+      # Configurable host port so the UI can run beside another app on :8000 —
+      # set WEBUI_HOST_PORT in .env (container always serves on 8000).
+      - "${WEBUI_HOST_PORT:-8000}:8000"
 
   # Intelligent MCP server: GeoServer agent (Microsoft Agent Framework) exposed
   # over streamable-HTTP at http://localhost:9000/mcp. Visible, long-lived.
@@ -192,7 +198,9 @@ services:
       GEO_ALLOW_DESTRUCTIVE: ${GEO_ALLOW_DESTRUCTIVE:-false}
       GEO_MAP_OUTPUT_DIR: /app/maps
     ports:
-      - "9000:9000"
+      # Configurable host port so the MCP server can run beside another on :9000
+      # — set MCP_HOST_PORT in .env (container always serves on 9000).
+      - "${MCP_HOST_PORT:-9000}:9000"
     healthcheck:
       test: ["CMD", "python", "-c",
              "import socket; socket.create_connection(('127.0.0.1', 9000), timeout=3)"]
