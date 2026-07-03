@@ -768,78 +768,25 @@ class EnrichIn(BaseModel):
     limit: int = 500
 
 
-async def _autopick_dtm(workspace: str) -> str | None:
-    """First file-backed coverage (raster) in a workspace — a default DTM."""
-    client = get_client()
-    try:
-        data = await client.get_json(f"workspaces/{workspace}/coveragestores.json")
-    except GeoServerError:
-        return None
-    for cs in extract(data, "coverageStores", "coverageStore"):
-        store = cs.get("name") if isinstance(cs, dict) else None
-        if not store:
-            continue
-        try:
-            d = await client.get_json(
-                f"workspaces/{workspace}/coveragestores/{store}.json")
-        except GeoServerError:
-            continue
-        url = (d.get("coverageStore", {}) or {}).get("url", "")
-        if url.startswith("file:"):
-            return url.split("file:", 1)[-1]
-    return None
-
-
 @app.post("/api/enrich")
-async def enrich_layer(body: EnrichIn) -> dict:
+async def enrich_endpoint(body: EnrichIn) -> dict:
     """Enrich a vector layer's features with DTM terrain metrics (on-demand).
 
     Generic: works for any point/line/polygon layer and any DTM published as a
     coverage. Returns per-feature metrics + a dataset-level summary; writes
     nothing. Restrict the work with ``bbox`` and ``limit`` for large layers.
+    Shares its core with the ``geo_enrich_from_dtm`` MCP tool.
     """
     from mcp_geo_server import enrich as _enrich
-
-    ws, _, _name = body.layer.partition(":")
-    dtm_path = None
-    if body.dtm:
-        dtm_path = await _enrich.coverage_file_path(body.dtm)
-    if not dtm_path:
-        dtm_path = (os.environ.get("GEO_DTM_PATH") or "").strip() or None
-    if not dtm_path:
-        dtm_path = await _autopick_dtm(ws)
-    if not dtm_path:
-        raise HTTPException(status_code=400,
-                            detail="no DTM available — specify 'dtm' (a raster "
-                                   "coverage layer name).")
-
-    params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
-              "typeNames": body.layer, "outputFormat": "application/json",
-              "srsName": "EPSG:4326", "count": str(max(1, body.limit))}
-    if body.bbox:
-        params["bbox"] = f"{body.bbox},EPSG:4326"
-    resp = await _guard(get_client().ows(params, base=get_client().settings.wfs_base))
-    import json as _json
     try:
-        fc = _json.loads(resp.text)
+        return await _enrich.enrich_layer(
+            body.layer, metrics=body.metrics, dtm=body.dtm,
+            bbox=body.bbox, limit=body.limit)
     except ValueError as exc:
-        raise HTTPException(status_code=502,
-                            detail=f"WFS did not return GeoJSON: {exc}") from exc
-    feats = [{"id": f.get("id"), "geometry": f["geometry"]}
-             for f in fc.get("features", []) if f.get("geometry")]
-    metrics = _enrich.normalize_metrics(body.metrics)
-    if not feats:
-        return {"layer": body.layer, "dtm_path": dtm_path, "metrics": metrics,
-                "count": 0, "summary": {"count": 0}, "features": []}
-    try:
-        results = await asyncio.to_thread(
-            _enrich.enrich_features, feats, dtm_path=dtm_path, metrics=metrics)
-    except Exception as exc:  # noqa: BLE001 — surface enrichment errors as 400
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — surface enrichment errors
         raise HTTPException(status_code=400,
                             detail=f"enrichment failed: {exc}") from exc
-    return {"layer": body.layer, "dtm_path": dtm_path, "metrics": metrics,
-            "count": len(results), "summary": _enrich.summarize(results, metrics),
-            "features": results}
 
 
 @app.get("/")

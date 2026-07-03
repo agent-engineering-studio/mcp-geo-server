@@ -40,6 +40,7 @@ def collect_tools() -> list[Callable]:
         ogc,
         status,
         styles,
+        terrain,
         workspaces,
     )
 
@@ -77,6 +78,8 @@ def collect_tools() -> list[Callable]:
         styles.geo_update_style,
         styles.geo_assign_style_to_layer,
         styles.geo_delete_style,
+        # terrain analysis (DTM enrichment)
+        terrain.geo_enrich_from_dtm,
         # OGC
         ogc.geo_wms_get_capabilities,
         ogc.geo_wms_get_map,

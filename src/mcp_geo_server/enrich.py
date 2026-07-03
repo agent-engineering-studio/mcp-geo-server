@@ -185,6 +185,84 @@ def enrich_features(features: list[dict], *, dtm_path: str,
     return results
 
 
+async def autopick_dtm(workspace: str) -> str | None:
+    """First file-backed coverage (raster) in a workspace — a default DTM."""
+    from .client import GeoServerError, get_client
+    from .formatting import extract
+
+    client = get_client()
+    try:
+        data = await client.get_json(f"workspaces/{workspace}/coveragestores.json")
+    except GeoServerError:
+        return None
+    for cs in extract(data, "coverageStores", "coverageStore"):
+        store = cs.get("name") if isinstance(cs, dict) else None
+        if not store:
+            continue
+        try:
+            d = await client.get_json(
+                f"workspaces/{workspace}/coveragestores/{store}.json")
+        except GeoServerError:
+            continue
+        url = (d.get("coverageStore", {}) or {}).get("url", "")
+        if url.startswith("file:"):
+            return url.split("file:", 1)[-1]
+    return None
+
+
+async def resolve_dtm_path(dtm: str | None, workspace: str) -> str | None:
+    """DTM file path from (in order): a coverage layer name, GEO_DTM_PATH, or
+    an auto-picked raster coverage in ``workspace``."""
+    import os
+    if dtm:
+        p = await coverage_file_path(dtm)
+        if p:
+            return p
+    p = (os.environ.get("GEO_DTM_PATH") or "").strip() or None
+    return p or await autopick_dtm(workspace)
+
+
+async def enrich_layer(layer: str, *, metrics: Iterable[str] | None = None,
+                       dtm: str | None = None, bbox: str | None = None,
+                       limit: int = 500) -> dict:
+    """Enrich a published vector layer's features with DTM terrain metrics.
+
+    Shared core for the web endpoint and the MCP tool: resolves the DTM file,
+    fetches the layer's features via WFS (GeoJSON, EPSG:4326, capped by
+    ``limit`` and optional ``bbox``), computes the metrics and a dataset
+    summary. Raises ``ValueError`` if no DTM can be resolved.
+    """
+    import asyncio
+    import json as _json
+
+    from .client import get_client
+
+    client = get_client()
+    ws, _, _name = layer.partition(":")
+    dtm_path = await resolve_dtm_path(dtm, ws)
+    if not dtm_path:
+        raise ValueError("no DTM available — specify 'dtm' (a raster coverage "
+                         "layer name).")
+    params = {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
+              "typeNames": layer, "outputFormat": "application/json",
+              "srsName": "EPSG:4326", "count": str(max(1, limit))}
+    if bbox:
+        params["bbox"] = f"{bbox},EPSG:4326"
+    resp = await client.ows(params, base=client.settings.wfs_base)
+    fc = _json.loads(resp.text)
+    feats = [{"id": f.get("id"), "geometry": f["geometry"]}
+             for f in fc.get("features", []) if f.get("geometry")]
+    wanted = normalize_metrics(metrics)
+    if not feats:
+        return {"layer": layer, "dtm": dtm_path, "metrics": wanted,
+                "count": 0, "summary": {"count": 0}, "features": []}
+    results = await asyncio.to_thread(enrich_features, feats, dtm_path=dtm_path,
+                                      metrics=wanted)
+    return {"layer": layer, "dtm": dtm_path, "metrics": wanted,
+            "count": len(results), "summary": summarize(results, wanted),
+            "features": results}
+
+
 def summarize(results: list[dict], metrics: Iterable[str] | None = None) -> dict:
     """Aggregate per-feature results into dataset-level stats per metric."""
     import statistics

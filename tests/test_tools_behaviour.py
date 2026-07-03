@@ -13,12 +13,14 @@ from mcp_geo_server.client import OwsResponse
 
 def test_all_tools_registered(tools):
     registry, _ = tools
-    assert len(registry) == 32, sorted(registry)
+    assert len(registry) == 33, sorted(registry)
     assert "geo_get_status" in registry
     assert "geo_build_web_map" in registry
     # Raster (coverage store) tools are registered too.
     assert "geo_create_coveragestore_geotiff" in registry
     assert "geo_delete_coveragestore" in registry
+    # Terrain enrichment tool.
+    assert "geo_enrich_from_dtm" in registry
 
 
 async def test_status(tools):

@@ -295,7 +295,7 @@ images to the GitHub Container Registry:
 | `ghcr.io/<owner>/mcp-geo-server:latest` | `base` | app image (web UI + MCP agent) |
 | `ghcr.io/<owner>/mcp-geo-server:bootstrap` | `bootstrap` | adds GDAL (`ogr2ogr`) + `psql` for data init / upload |
 
-## Agent tools (32 `geo_*` functions)
+## Agent tools (33 `geo_*` functions)
 
 These are the tools the agent calls internally (they are not exposed
 individually over MCP — the agent is). `make tools` lists them.
@@ -315,6 +315,7 @@ individually over MCP — the agent is). `make tools` lists them.
 | `geo_get_coverage` | read | Get a published coverage (bbox / SRS) |
 | `geo_create_coveragestore_geotiff` | write | Register a GeoTIFF as an external coverage store + publish it |
 | `geo_delete_coveragestore` | destructive | Delete coverage store (`recurse`; leaves the file on disk) |
+| `geo_enrich_from_dtm` | read | Terrain metrics (quota/slope/aspect/curvature) for a vector layer, sampled from a DTM coverage |
 | `geo_list_featuretypes` | read | List feature types (or available tables) |
 | `geo_publish_featuretype` | write | Publish a table as a layer (recalculates bbox) |
 | `geo_list_layers` | read | List layers |

@@ -207,10 +207,17 @@ services:
       GEO_MCP_PORT: "9000"
       GEO_ALLOW_DESTRUCTIVE: ${GEO_ALLOW_DESTRUCTIVE:-false}
       GEO_MAP_OUTPUT_DIR: /app/maps
+      # DTM referenced by coverage layer; GEO_DTM_PATH is an optional override.
+      GEO_DTM_PATH: ${GEO_DTM_PATH:-}
     ports:
       # Configurable host port so the MCP server can run beside another on :9000
       # — set MCP_HOST_PORT in .env (container always serves on 9000).
       - "${MCP_HOST_PORT:-9000}:9000"
+    volumes:
+      # The geo_enrich_from_dtm tool reads the DTM file directly (GDAL), so the
+      # agent server needs the raster data mounted (read-only).
+      - ./data:/data:ro
+      - ./data-processed:/data-processed:ro
     healthcheck:
       test: ["CMD", "python", "-c",
              "import socket; socket.create_connection(('127.0.0.1', 9000), timeout=3)"]
