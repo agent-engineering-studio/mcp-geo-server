@@ -160,10 +160,20 @@ services:
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      # Terrain enrichment reads the DTM raster FILE directly (not WMS). The DTM
+      # is referenced by its COVERAGE LAYER name and the file path is resolved
+      # from GeoServer at runtime (works for ANY published DTM). GEO_DTM_PATH is
+      # only an optional explicit override / fallback when no layer is given.
+      GEO_DTM_PATH: ${GEO_DTM_PATH:-}
     ports:
       # Configurable host port so the UI can run beside another app on :8000 —
       # set WEBUI_HOST_PORT in .env (container always serves on 8000).
       - "${WEBUI_HOST_PORT:-8000}:8000"
+    volumes:
+      # The enrichment reads the DTM file directly (GDAL), so the UI needs it
+      # mounted (read-only), like the geo-init/geoserver services.
+      - ./data:/data:ro
+      - ./data-processed:/data-processed:ro
 
   # Intelligent MCP server: GeoServer agent (Microsoft Agent Framework) exposed
   # over streamable-HTTP at http://localhost:9000/mcp. Visible, long-lived.

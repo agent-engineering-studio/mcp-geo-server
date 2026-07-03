@@ -33,6 +33,10 @@ webui = [
     # in the chat: the region polygon is simplified so its WKT fits in the WMS
     # tile GET URL.
     "shapely>=2.0",
+    # On-demand terrain enrichment from a DTM (quota/slope/aspect/curvature):
+    # windowed raster reads + zonal statistics.
+    "rasterio>=1.3",
+    "rasterstats>=0.19",
 ]
 
 [project.scripts]
