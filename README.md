@@ -247,8 +247,15 @@ async with streamablehttp_client("http://localhost:9000/mcp") as (r, w, _):
 | Host Ollama | `ollama` | host Ollama running | Default. No API key; `make ollama-pull` on the host. Containers reach it via `host.docker.internal`. |
 | Ollama Cloud | `ollama-cloud` | `OLLAMA_API_KEY` | Hosted models; set `OLLAMA_LLM_MODEL` to a cloud model. `make up-ollama-cloud`. |
 | Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` | Uses `ANTHROPIC_MODEL`. `make up-claude`. |
+| OpenAI-compatible | `openai` | `OPENAI_LLM_MODEL` | Any `/v1` endpoint: an inference gateway (LiteLLM), llama-server / llama-swap, vLLM, or OpenAI itself. Set `OPENAI_BASE_URL` for anything but OpenAI. |
 
-The model is read from **`OLLAMA_LLM_MODEL`** (falls back to `OLLAMA_MODEL`).
+The `ollama` and `ollama-cloud` providers speak Ollama's **own** `/api/chat`
+protocol, not the OpenAI shape. An inference gateway that exposes
+`/v1/chat/completions` therefore needs `GEO_LLM_PROVIDER=openai`; pointing
+`OLLAMA_HOST` at it fails on the URL, before the model is ever consulted.
+
+The model is read from **`OLLAMA_LLM_MODEL`** (falls back to `OLLAMA_MODEL`),
+or from **`OPENAI_LLM_MODEL`** under the `openai` provider.
 Put your per-machine config in **`.env.local`** (loaded by the Makefile and
 gitignored), e.g. `OLLAMA_LLM_MODEL=llama3.2:3b`.
 
@@ -274,11 +281,14 @@ uvicorn webui.app:app --reload --port 8000   # run the UI locally
 | `GEOSERVER_VERIFY_TLS` | `true` | Verify TLS certificates |
 | `GEO_MAP_OUTPUT_DIR` | `./maps` | Where generated maps / downloaded PNGs are saved |
 | `WEBUI_PORT` | `8000` | Port for the web UI |
-| `GEO_LLM_PROVIDER` | `ollama` | `ollama`, `ollama-cloud` or `anthropic` |
+| `GEO_LLM_PROVIDER` | `ollama` | `ollama`, `ollama-cloud`, `anthropic` or `openai` |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint (containers use `host.docker.internal`) |
 | `OLLAMA_LLM_MODEL` | `qwen2.5` | Ollama model (tool-calling capable / cloud model id) |
 | `OLLAMA_CLOUD_HOST` / `OLLAMA_API_KEY` | `https://ollama.com` / _(none)_ | Ollama Cloud endpoint / key |
 | `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | _(none)_ / `claude-sonnet-4-6` | Anthropic key / model |
+| `OPENAI_BASE_URL` | _(none → api.openai.com)_ | OpenAI-compatible endpoint, **including** the `/v1` suffix |
+| `OPENAI_LLM_MODEL` | _(none)_ | Required under `openai`; a routing key behind a gateway |
+| `OPENAI_API_KEY` | _(none)_ | Required for OpenAI; optional for a keyless gateway |
 | `GEO_MCP_TRANSPORT` / `GEO_MCP_HOST` / `GEO_MCP_PORT` | `stdio` / `0.0.0.0` / `9000` | MCP transport + bind |
 | `GEO_ALLOW_DESTRUCTIVE` | `false` | Allow destructive tools (`geo_delete_*`, `geo_wfs_transaction`) |
 

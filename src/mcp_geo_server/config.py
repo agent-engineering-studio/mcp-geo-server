@@ -49,13 +49,18 @@ class Settings:
     map_output_dir: str
     webui_port: int
     # Intelligent MCP agent (Microsoft Agent Framework)
-    llm_provider: str            # "ollama" | "ollama-cloud" | "anthropic"
+    llm_provider: str            # "ollama" | "ollama-cloud" | "anthropic" | "openai"
     ollama_host: str
     ollama_model: str
     ollama_cloud_host: str
     ollama_api_key: str
     anthropic_api_key: str
     anthropic_model: str
+    # Any OpenAI-compatible /v1 endpoint: an inference gateway (LiteLLM),
+    # llama-server / llama-swap, vLLM, or OpenAI itself when base_url is unset.
+    openai_base_url: str
+    openai_model: str
+    openai_api_key: str
     mcp_transport: str
     mcp_host: str
     mcp_port: int
@@ -136,6 +141,13 @@ def _load() -> Settings:
         ollama_api_key=(os.environ.get("OLLAMA_API_KEY") or "").strip(),
         anthropic_api_key=(os.environ.get("ANTHROPIC_API_KEY") or "").strip(),
         anthropic_model=(os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-6").strip(),
+        # Empty = the OpenAI SDK's own default (api.openai.com). Include the
+        # /v1 suffix: the SDK appends only the path, not the version segment.
+        openai_base_url=(os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/"),
+        # No default: behind a gateway the model name is an arbitrary routing
+        # key, so guessing one would only turn a clear config error into a 404.
+        openai_model=(os.environ.get("OPENAI_LLM_MODEL") or "").strip(),
+        openai_api_key=(os.environ.get("OPENAI_API_KEY") or "").strip(),
         mcp_transport=(os.environ.get("GEO_MCP_TRANSPORT") or "stdio").strip().lower(),
         mcp_host=(os.environ.get("GEO_MCP_HOST") or "0.0.0.0").strip(),
         mcp_port=_as_int(os.environ.get("GEO_MCP_PORT"), 9000),
