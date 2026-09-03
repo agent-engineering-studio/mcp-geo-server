@@ -45,6 +45,35 @@ def test_anthropic_builds_with_key():
     assert "Anthropic" in type(client).__name__
 
 
+def test_openai_requires_model():
+    """Behind a gateway the model name is a routing key with no sensible
+    default, so an unset one must fail loudly instead of 404-ing later."""
+    with pytest.raises(RuntimeError):
+        _build_chat_client(_settings(llm_provider="openai", openai_model=""))
+
+
+def test_openai_builds_against_a_gateway_without_a_key():
+    """A self-hosted gateway with no master key must still be usable: the
+    OpenAI SDK refuses to construct without a credential, so the provider
+    supplies a placeholder."""
+    client = _build_chat_client(
+        _settings(
+            llm_provider="openai",
+            openai_model="fast",
+            openai_base_url="http://host.docker.internal:8091/v1",
+            openai_api_key="",
+        )
+    )
+    assert type(client).__name__ == "OpenAIChatClient"
+
+
+def test_openai_builds_with_a_key():
+    client = _build_chat_client(
+        _settings(llm_provider="openai", openai_model="chat", openai_api_key="sk-test")
+    )
+    assert type(client).__name__ == "OpenAIChatClient"
+
+
 def test_unknown_provider_raises():
     with pytest.raises(RuntimeError):
         _build_chat_client(_settings(llm_provider="bogus"))

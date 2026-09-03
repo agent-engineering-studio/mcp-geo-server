@@ -10,6 +10,14 @@ Supported LLM providers (``GEO_LLM_PROVIDER``):
 * ``ollama``        — local Ollama server (default, no API key)
 * ``ollama-cloud``  — Ollama Cloud (https://ollama.com), needs ``OLLAMA_API_KEY``
 * ``anthropic``     — Claude via the Anthropic API, needs ``ANTHROPIC_API_KEY``
+* ``openai``        — any OpenAI-compatible ``/v1`` endpoint, needs
+  ``OPENAI_LLM_MODEL`` (and ``OPENAI_BASE_URL`` for anything that is not
+  OpenAI itself)
+
+The ``openai`` provider is what a self-hosted inference gateway needs: the
+``ollama`` providers speak Ollama's own ``/api/chat`` protocol, so pointing
+``OLLAMA_HOST`` at a gateway that exposes ``/v1/chat/completions`` fails on the
+URL, not on the model.
 """
 
 from __future__ import annotations
@@ -82,9 +90,26 @@ def _build_chat_client(settings: Settings):
 
         return OllamaChatClient(host=settings.ollama_host, model=settings.ollama_model)
 
+    if provider == "openai":
+        from agent_framework.openai import OpenAIChatClient
+
+        if not settings.openai_model:
+            raise RuntimeError(
+                "GEO_LLM_PROVIDER=openai requires OPENAI_LLM_MODEL (behind a "
+                "gateway this is a routing key in its model list, e.g. 'fast')."
+            )
+        return OpenAIChatClient(
+            model=settings.openai_model,
+            # The OpenAI SDK refuses to construct without a credential, while a
+            # self-hosted gateway with no master key ignores whatever it gets.
+            # Send a placeholder rather than make keyless gateways unusable.
+            api_key=settings.openai_api_key or "sk-no-key-required",
+            base_url=settings.openai_base_url or None,
+        )
+
     raise RuntimeError(
         f"Unknown GEO_LLM_PROVIDER '{provider}'. "
-        "Use 'ollama', 'ollama-cloud' or 'anthropic'."
+        "Use 'ollama', 'ollama-cloud', 'anthropic' or 'openai'."
     )
 
 
