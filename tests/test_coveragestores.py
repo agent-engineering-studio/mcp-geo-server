@@ -76,6 +76,51 @@ def test_raster_name_uses_folder_in_subfolder(tmp_path):
     assert raster_name_for(tif, tmp_path) == "lombardia"
 
 
+def _make_rasters(root: Path) -> None:
+    for rel in ("dtm/HRDTM5m.tif", "clc2018_it/clc2018_it_100m.tif",
+                "lombardia/dtm.TIF", "lombardia/frane.shp"):
+        f = root / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.touch()
+
+
+def _rel(paths, root):
+    return [p.relative_to(root).as_posix() for p in paths]
+
+
+def test_discover_rasters_finds_all_by_default(tmp_path):
+    from mcp_geo_server.bootstrap import discover_rasters
+    _make_rasters(tmp_path)
+    assert _rel(discover_rasters(tmp_path), tmp_path) == [
+        "clc2018_it/clc2018_it_100m.tif", "dtm/HRDTM5m.tif", "lombardia/dtm.TIF"]
+
+
+def test_discover_rasters_exclude_globs(tmp_path):
+    from mcp_geo_server.bootstrap import discover_rasters
+    _make_rasters(tmp_path)
+    # Folder glob + bare file-name glob (matched against the name only).
+    found = discover_rasters(tmp_path, exclude=["dtm/*", "clc2018_it_*.tif"])
+    assert _rel(found, tmp_path) == ["lombardia/dtm.TIF"]
+
+
+def test_discover_rasters_include_globs(tmp_path):
+    from mcp_geo_server.bootstrap import discover_rasters
+    _make_rasters(tmp_path)
+    found = discover_rasters(tmp_path, include=["lombardia/*"])
+    assert _rel(found, tmp_path) == ["lombardia/dtm.TIF"]
+    # Exclude wins over include.
+    assert discover_rasters(tmp_path, include=["*"], exclude=["*"]) == []
+
+
+def test_bootstrap_config_parses_raster_globs(monkeypatch):
+    from mcp_geo_server.bootstrap import BootstrapConfig
+    monkeypatch.setenv("GEO_INIT_RASTER_EXCLUDE", " dtm/* , ,clc2018_it/* ")
+    monkeypatch.delenv("GEO_INIT_RASTER_INCLUDE", raising=False)
+    cfg = BootstrapConfig()
+    assert cfg.raster_exclude == ["dtm/*", "clc2018_it/*"]
+    assert cfg.raster_include == []
+
+
 async def test_publish_geotiff_skips_when_store_exists(fake_client):
     # existing set contains the store -> no PUT is issued.
     created = await ingest.publish_geotiff(
