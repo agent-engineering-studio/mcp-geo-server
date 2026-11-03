@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="260" viewBox="0 0 1200 260" role="img" aria-labelledby="t2">
+  <title id="t2">How mcp-geo-server works in four steps</title>
+  <style>
+    .card{fill:#ffffff;stroke:#d0d7de;stroke-width:2}
+    .n{font:700 22px Segoe UI,Helvetica,Arial,sans-serif;fill:#ffffff}
+    .h{font:700 19px Segoe UI,Helvetica,Arial,sans-serif;fill:#14213d}
+    .p{font:16px Segoe UI,Helvetica,Arial,sans-serif;fill:#5c677d}
+  </style>
+  <rect width="1200" height="260" rx="20" fill="#f4f7fb"/>
+  <g>
+    <rect class="card" x="30" y="40" width="250" height="180" rx="16"/>
+    <circle cx="70" cy="80" r="22" fill="#118ab2"/><text class="n" x="70" y="88" text-anchor="middle">1</text>
+    <text class="h" x="104" y="88">Drop your data</text>
+    <text class="p" x="54" y="132">Put shapefiles and</text>
+    <text class="p" x="54" y="156">GeoTIFFs in ./data</text>
+    <text class="p" x="54" y="180">— any folder layout.</text>
+  </g>
+  <path d="M290 130h28" stroke="#8d99ae" stroke-width="3"/><path d="M314 122l10 8-10 8z" fill="#8d99ae"/>
+  <g>
+    <rect class="card" x="330" y="40" width="250" height="180" rx="16"/>
+    <circle cx="370" cy="80" r="22" fill="#06d6a0"/><text class="n" x="370" y="88" text-anchor="middle">2</text>
+    <text class="h" x="404" y="88">Auto-publish</text>
+    <text class="p" x="354" y="132">Loaded into PostGIS,</text>
+    <text class="p" x="354" y="156">published in GeoServer,</text>
+    <text class="p" x="354" y="180">styled from a YAML file.</text>
+  </g>
+  <path d="M590 130h28" stroke="#8d99ae" stroke-width="3"/><path d="M614 122l10 8-10 8z" fill="#8d99ae"/>
+  <g>
+    <rect class="card" x="630" y="40" width="250" height="180" rx="16"/>
+    <circle cx="670" cy="80" r="22" fill="#ffb703"/><text class="n" x="670" y="88" text-anchor="middle">3</text>
+    <text class="h" x="704" y="88">Ask anything</text>
+    <text class="p" x="654" y="132">“Very high landslide</text>
+    <text class="p" x="654" y="156">hazard in Campania”</text>
+    <text class="p" x="654" y="180">in chat or via MCP.</text>
+  </g>
+  <path d="M890 130h28" stroke="#8d99ae" stroke-width="3"/><path d="M914 122l10 8-10 8z" fill="#8d99ae"/>
+  <g>
+    <rect class="card" x="930" y="40" width="240" height="180" rx="16"/>
+    <circle cx="970" cy="80" r="22" fill="#ef476f"/><text class="n" x="970" y="88" text-anchor="middle">4</text>
+    <text class="h" x="1004" y="88">See the map</text>
+    <text class="p" x="954" y="132">Right layers, right</text>
+    <text class="p" x="954" y="156">filter, zoomed in, with</text>
+    <text class="p" x="954" y="180">a legend and a summary.</text>
+  </g>
+</svg>
