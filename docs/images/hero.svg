@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="380" viewBox="0 0 1200 380" role="img" aria-labelledby="t d">
+  <title id="t">mcp-geo-server</title>
+  <desc id="d">Talk to your maps: ask GeoServer in plain language, an AI agent finds the layers and draws the map.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1d3a"/>
+      <stop offset="1" stop-color="#0f5c66"/>
+    </linearGradient>
+    <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffd166"/>
+      <stop offset="1" stop-color="#ef476f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="380" rx="24" fill="url(#bg)"/>
+  <!-- topographic contour motif -->
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.07" stroke-width="2">
+    <path d="M700 380c40-90 120-120 210-110s170-60 290-40"/>
+    <path d="M660 380c50-120 150-160 250-150s160-70 290-55"/>
+    <path d="M620 380c60-150 180-200 290-190s150-80 290-70"/>
+    <path d="M580 380c70-180 210-240 330-230s140-90 290-85"/>
+    <path d="M540 380c80-210 240-280 370-270s130-100 290-100"/>
+    <path d="M500 380c90-240 270-320 410-310s120-80 290-110"/>
+  </g>
+  <text x="64" y="118" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="58" font-weight="700" fill="#ffffff">mcp-geo-server</text>
+  <rect x="64" y="138" width="190" height="6" rx="3" fill="url(#glow)"/>
+  <text x="64" y="196" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="30" font-weight="600" fill="#ffd166">Talk to your maps.</text>
+  <text x="64" y="240" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" fill="#d7e3f4">Ask GeoServer a question in plain language.</text>
+  <text x="64" y="268" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" fill="#d7e3f4">An AI agent finds the right layers, filters the data</text>
+  <text x="64" y="296" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" fill="#d7e3f4">and draws the map — over MCP or in a chat web UI.</text>
+  <!-- flow: ask -> agent -> map -->
+  <g font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="17" text-anchor="middle">
+    <g transform="translate(760 92)">
+      <rect width="340" height="58" rx="29" fill="#ffffff" fill-opacity="0.12" stroke="#ffffff" stroke-opacity="0.35"/>
+      <text x="170" y="36" fill="#ffffff">“Landslides in Campania, high hazard”</text>
+    </g>
+    <path d="M930 158v26" stroke="#ffd166" stroke-width="3"/><path d="M922 180l8 10 8-10" fill="#ffd166"/>
+    <g transform="translate(790 196)">
+      <rect width="280" height="52" rx="12" fill="#ffd166"/>
+      <text x="140" y="32" fill="#0b1d3a" font-weight="700">AI agent · GeoServer tools</text>
+    </g>
+    <path d="M930 254v26" stroke="#ffd166" stroke-width="3"/><path d="M922 276l8 10 8-10" fill="#ffd166"/>
+    <g transform="translate(770 292)">
+      <rect width="320" height="52" rx="12" fill="#ffffff"/>
+      <!-- tiny map -->
+      <rect x="14" y="10" width="44" height="32" rx="4" fill="#e8f1f5"/>
+      <path d="M18 36l10-12 8 7 8-14 10 19z" fill="#ef476f" fill-opacity="0.85"/>
+      <text x="72" y="32" fill="#0b1d3a" font-weight="700" text-anchor="start">map + legend + answer</text>
+    </g>
+  </g>
+</svg>

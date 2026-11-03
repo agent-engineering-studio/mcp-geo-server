@@ -1,130 +1,390 @@
-# mcp-geo-server
+<p align="center">
+  <img src="docs/images/hero.svg" alt="mcp-geo-server — talk to your maps: ask GeoServer in plain language, an AI agent finds the layers and draws the map" width="100%">
+</p>
 
-An **intelligent MCP (Model Context Protocol) server** that drives a **GeoServer**
-instance in natural language, plus a **chat + map web UI** and a fully
-**Dockerised, domain-agnostic** GIS stack.
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-green.svg"></a>
+  <img alt="Python 3.11+" src="https://img.shields.io/badge/python-3.11%2B-blue.svg">
+  <img alt="MCP server" src="https://img.shields.io/badge/MCP-server-7c3aed.svg">
+  <img alt="GeoServer 2.28" src="https://img.shields.io/badge/GeoServer-2.28-0f5c66.svg">
+  <img alt="Docker amd64 + arm64" src="https://img.shields.io/badge/docker-amd64%20%7C%20arm64-2496ed.svg">
+  <img alt="LLM: Ollama, Claude, OpenAI-compatible" src="https://img.shields.io/badge/LLM-Ollama%20%7C%20Claude%20%7C%20OpenAI--compatible-ffb703.svg">
+</p>
 
-The MCP server is built with the **Microsoft Agent Framework**: an LLM-backed
-*agent* is given the GeoServer operations as tools and exposed as a single MCP
-tool via `agent.as_mcp_server()`. Any MCP client sends a request like *"how many
-features in topp:states?"* and the agent decides which GeoServer operations to
-call. The LLM backend is pluggable — **host Ollama**, **Ollama Cloud**, or
-**Anthropic Claude**.
-
-Nothing in the code is tied to a specific dataset: the example stack ships the
-ISPRA landslide/hazard open data, but the catalog, the natural-language layer
-resolution and the thematic styles are all **driven by GeoServer metadata and
-config**, so the same stack serves any domain.
-
-The same async core (`GeoServerClient` + the `geo_*` tool functions + the shared
-`ingest`/`catalog`/`styling` modules) is used by the agent, the web UI and the
-data bootstrap — there is exactly one place that talks to GeoServer.
-
-![mcp-geo-server — chat-first web UI: ask in natural language, the matching layers render on the map with a thematic legend](docs/screenshot-chat-map.png)
-
-*The chat (left) resolves a natural-language request to GeoServer layers and
-renders them on the map (right) with a thematic legend — here the landslide
-areas of the Marche region, classified by movement type.*
+<p align="center">
+  <b>Ask your GeoServer a question in plain language. Get back the right map.</b><br>
+  An open-source AI agent and chat-and-map web app that turns words into maps.
+</p>
 
 ---
 
-## Highlights
+## What is this?
 
-- 🧠 **Natural-language GeoServer agent** over MCP (stdio or streamable-HTTP).
-- 💬 **Chat-first web UI**: ask in plain language, the matching layers render on a
-  Leaflet map with a live WMS legend. Shapefile upload on a dedicated page.
-- 📦 **Idempotent data bootstrap**: drop shapefiles in `./data`, the stack loads
-  them into PostGIS and publishes them as GeoServer layers automatically.
-- 🎨 **Config-driven thematic SLD styles** (YAML) — no styles hardcoded in code.
-- 🌍 **Domain-agnostic**: the layer catalog is read from the WMS capabilities;
-  style assignment is name-pattern based. Point it at any GeoServer.
-- 🖥️ **Native arm64 + amd64** images (no QEMU emulation on Apple Silicon), with a
-  per-architecture image switch in the Makefile.
-- 🚀 **CI/CD**: a GitHub Action builds and publishes multi-arch images to GHCR.
+**[GeoServer](https://geoserver.org)** is one of the most widely used open-source
+map servers. It is powerful, but getting the map you want means knowing layer
+names, filter syntax, styles and REST calls.
 
-## Prerequisites
+**mcp-geo-server puts an AI agent in front of it.** You type what you want to see,
+for example:
 
-- Python **3.11+**
-- Docker + Docker Compose
-- A **host Ollama** (https://ollama.com) for the local LLM — or use Ollama Cloud
-  / Anthropic instead. There is **no Ollama container**; the stack talks to the
-  host Ollama via `host.docker.internal`.
+> *"Show me the very high landslide hazard areas in Campania"*
 
-## 1. Start the stack (Docker)
+The agent then:
 
-```bash
-ollama serve &            # start host Ollama (if not already running)
-make ollama-pull          # pull the model onto the HOST Ollama (see OLLAMA_LLM_MODEL)
-make build                # build the app images + pull GeoServer/PostGIS (per host arch)
-make up                   # start the whole stack (checks host Ollama is reachable)
+1. reads what your GeoServer actually publishes;
+2. picks the right layer;
+3. builds the right filter;
+4. zooms to the right place;
+5. draws the map with a legend and a short description of the data.
+
+You can use it in three ways:
+
+| | How | Good for |
+|---|---|---|
+| 💬 **Chat + map web UI** | open <http://localhost:8000> | exploring data, demos, non-GIS colleagues |
+| 🧠 **MCP server** | plug it into Claude Desktop, an IDE, or your own agent | letting *any* AI assistant work with your maps |
+| 📦 **Data bootstrap** | drop files in `./data`, run `make up` | turning a folder of shapefiles and GeoTIFFs into a live map server |
+
+![The chat on the left resolves a natural-language request; the map on the right shows the matching layers with a thematic legend](docs/screenshot-chat-map.png)
+
+*Chat on the left, map on the right. Here the request was for the landslide
+areas of the Marche region, coloured by type of movement.*
+
+---
+
+## How it works
+
+<p align="center">
+  <img src="docs/images/how-it-works.svg" alt="1. Drop your data · 2. Auto-publish to PostGIS + GeoServer · 3. Ask in plain language · 4. See the map" width="100%">
+</p>
+
+Nothing in the code is tied to one dataset. The agent learns what is available
+from GeoServer itself, from each layer's name, title, abstract and keywords. A
+YAML file sets the styles. **Point it at any GeoServer and it works with your data.**
+
+The demo stack ships ready for Italian open data on natural hazards: ISPRA
+landslide and flood maps, ISTAT boundaries, CORINE land cover and geology. That
+is what the maps below show.
+
+---
+
+## Map gallery
+
+Every map below was drawn live by GeoServer from the demo data. The quote on
+each card is the kind of request that leads to it.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/map-italy-hazard.png" alt="Landslide hazard zones across Italy, coloured from moderate (P1) to very high (P4)"></td>
+    <td width="50%"><img src="docs/images/map-campania-p4.png" alt="Only the very high (P4) landslide hazard zones in Campania, with provincial boundaries"></td>
+  </tr>
+  <tr>
+    <td><b>Landslide hazard across Italy.</b> The national PAI hazard mosaic (about 930,000 polygons), coloured from moderate (P1) to very high (P4).</td>
+    <td><b>Only the very high zones in Campania.</b> The AI chose the filter <code>per_fr_ita = 'Molto elevata P4'</code> on its own. See the real response <a href="#a-real-request-end-to-end">below</a>.</td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/images/map-amalfi-landslides.png" alt="Landslide inventory along the Sorrento–Amalfi coast, coloured by movement type, with municipal boundaries"></td>
+  </tr>
+  <tr>
+    <td colspan="2"><b>Landslides on the Sorrento–Amalfi coast.</b> The IFFI national landslide inventory, coloured by movement type (slow flow, rapid flow, fall, slide…), with municipal boundaries.</td>
+  </tr>
+</table>
+
+### An interactive map, right here on GitHub
+
+GitHub draws GeoJSON as a live map. Below are a few real landslide points from
+the IFFI inventory around Agerola, on the Amalfi coast, fetched from GeoServer
+over WFS. Click a marker to see its movement type. The full sample is in
+[`docs/examples/amalfi-landslides.geojson`](docs/examples/amalfi-landslides.geojson).
+
+```geojson
+{"type":"FeatureCollection","features":[{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5596,40.6432]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5534,40.6573]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5524,40.6465]}},
+{"type":"Feature","properties":{"movement":"Rapid flow","municipality":"Agerola","marker-color":"#ff7f00"},"geometry":{"type":"Point","coordinates":[14.5602,40.6581]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5673,40.6392]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5527,40.6567]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5583,40.6476]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5645,40.6344]}},
+{"type":"Feature","properties":{"movement":"Rapid flow","municipality":"Agerola","marker-color":"#ff7f00"},"geometry":{"type":"Point","coordinates":[14.5591,40.6287]}},
+{"type":"Feature","properties":{"movement":"Rapid flow","municipality":"Agerola","marker-color":"#ff7f00"},"geometry":{"type":"Point","coordinates":[14.5604,40.6544]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5554,40.6574]}},
+{"type":"Feature","properties":{"movement":"Slow flow","municipality":"Agerola","marker-color":"#984ea3"},"geometry":{"type":"Point","coordinates":[14.5692,40.6451]}}]}
 ```
 
-The Compose project is `mcp-geo-server`:
+---
 
-| Service | Container | Endpoint / role |
-|---|---|---|
-| `webui` | `mcp-geo-server-webui` | <http://localhost:8000> — chat + map UI (also proxies WMS) |
-| `mcp` | `mcp-geo-server-mcp` | <http://localhost:9000/mcp> — intelligent MCP server (streamable-HTTP) |
-| `geoserver` | `mcp-geo-server-geoserver` | <http://localhost:8080/geoserver> (admin / `geoserver`) |
-| `postgis` | `mcp-geo-server-postgis` | `localhost:5432` (gis / gis / gis) |
-| `geo-init` | `mcp-geo-server-init` | one-shot: load `./data` shapefiles + apply styles, then exits |
+## A real request, end to end
 
-The LLM (host Ollama / Cloud / Anthropic) is reached lazily over the network, so
-it never gates startup. GeoServer runs with `CORS_ENABLED=true`; the web UI also
-proxies WMS (see below) so the browser never needs to reach GeoServer directly.
-
-### Native images & the per-architecture switch
-
-Base images are multi-arch and selected by `uname -m` in the Makefile, so they
-run **native** (no emulation) on both Apple Silicon and Intel:
-
-| Host arch | PostGIS | GeoServer | GeoServer data dir |
-|---|---|---|---|
-| `arm64` / `aarch64` | `imresamu/postgis:16-3.4` | `kartoza/geoserver:2.28.0` | `/opt/geoserver/data_dir` |
-| `amd64` | `postgis/postgis:16-3.4` | `docker.osgeo.org/geoserver:2.28.0` | `/opt/geoserver_data` |
-
-Override per run with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`.
-Bare `docker compose` (without `make`) defaults to the multi-arch images.
-
-## 2. Web UI — chat & map
-
-Open <http://localhost:8000>. The window is split: **left = chat**, **right = a
-Leaflet/OpenStreetMap map** with a WMS legend (bottom-right).
-
-- **Chat** — type a request like *"mostrami le frane lineari del Molise"* or
-  *"trova le frane in Puglia"*. An LLM resolves it to the matching published
-  layer(s) (`POST /api/ask`); the map renders them as WMS overlays, zooms to
-  their extent, shows the legend, and the assistant replies with a **textual
-  description of the data type** (geometry kind, feature count, attributes).
-  Empty layers are flagged and not drawn.
-- **⬆️ Carica shapefile** (dedicated page `/upload`) — drag-and-drop a `.zip`
-  shapefile; it is loaded into PostGIS (`uploads` workspace) and published
-  (`POST /api/upload`).
-
-### WMS proxy
-
-The UI talks to WMS **only through the web UI** (`GET /wms`), which forwards
-GetMap/GetLegendGraphic to GeoServer over the internal network and streams the
-bytes back. This keeps everything same-origin (no host/port juggling, no CORS),
-and retries on transient `429` so tiled overlays load reliably.
-
-## 3. Data bootstrap & thematic styles
-
-**Bootstrap** — the `geo-init` container loads **every** shapefile under `./data`
-into PostGIS and publishes each as a GeoServer layer (default workspace `ispra`,
-datastore `ispra_pg`), reprojecting to EPSG:4326. It also registers **every
-GeoTIFF** (`*.tif` / `*.tiff`, e.g. a DTM/DEM) as an *external* coverage store —
-zero-copy: GeoServer reads the file in place through the shared `./data` mount,
-the raster is never duplicated. Fully idempotent and transversal — no assumption
-about folder names; the layer name comes from the parent folder. It runs
-automatically on `make up`; re-run on demand:
+The request below went to the web UI's `/api/ask` endpoint while the demo stack
+was running. The Campania card above draws this same filter, zoomed on the region:
 
 ```bash
-make init          # load any new shapefiles + (re)apply styles
+curl -s -X POST http://localhost:8000/api/ask \
+  -H 'content-type: application/json' \
+  -d '{"query": "show me the very high landslide hazard areas in Campania"}'
+```
+
+This is the answer the AI built, shortened slightly for reading. It chose one
+of more than 100 published layers and a filter on a real attribute value.
+The demo model answered in Italian.
+It also returned everything a map needs:
+
+```jsonc
+{
+  "layers": ["ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai"],
+  "cql_filter": "per_fr_ita = 'Molto elevata P4'",
+  "explanation": "La richiesta chiede le aree di pericolosità molto elevata (P4) per i frane in Campania…",
+  "info": [{
+    "qualified": "ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai",
+    "kind": "vector",
+    "geometry": "poligoni",
+    "fields": ["per_fr_ita"],
+    "count": 928542
+  }],
+  "cql_by_layer": {
+    "ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai": "per_fr_ita = 'Molto elevata P4'"
+  },
+  "bbox": {"minx": 6.65, "miny": 35.49, "maxx": 18.52, "maxy": 47.00}
+}
+```
+
+The AI was never told that `per_fr_ita` exists or that "very high" maps to
+`'Molto elevata P4'`. It worked that out from the GeoServer catalog and the
+style config, as explained in [How the AI picks layers](#how-the-ai-picks-layers).
+
+### Things you can ask
+
+The resolver understands requests in **English, Italian or any language your
+LLM speaks**. Some examples with the demo data:
+
+| You ask | What happens |
+|---|---|
+| *"Find the landslides in Puglia"* | picks the Puglia layers from the IFFI landslide inventory |
+| *"mostrami le frane lineari del Molise"* | picks the line-type landslides layer for Molise |
+| *"Very high landslide hazard in Campania"* | hazard layer + `per_fr_ita = 'Molto elevata P4'` filter |
+| *"Flood hazard areas around Bologna"* | flood-hazard layer, zoomed to and clipped by the municipality boundary |
+| *"High hazard areas with average slope and elevation"* | hazard layer + **terrain analysis** from a DTM: mean / min / max slope and elevation |
+| *"How many features are in topp:states?"* (via MCP) | the agent calls GeoServer and answers with the count |
+
+---
+
+## Quick start (about 5 minutes)
+
+You need **Docker** with Compose and an **LLM**. The default LLM is a local
+[Ollama](https://ollama.com); see [Choose your LLM](#choose-your-llm) for Claude,
+Ollama Cloud or any OpenAI-compatible endpoint.
+
+```bash
+git clone https://github.com/agent-engineering-studio/mcp-geo-server.git
+cd mcp-geo-server
+
+ollama serve &            # local LLM (skip if already running)
+make ollama-pull          # download the model onto the host Ollama
+make build                # build images (native on Intel and Apple Silicon)
+make up                   # start everything
+```
+
+Then open:
+
+| What | Where |
+|---|---|
+| 💬 Chat + map web UI | <http://localhost:8000> |
+| 🧠 MCP server (streamable HTTP) | <http://localhost:9000/mcp> |
+| 🗺️ GeoServer admin | <http://localhost:8080/geoserver> (`admin` / `geoserver`) |
+| 🐘 PostGIS | `localhost:5432` (`gis` / `gis` / `gis`) |
+
+**Add your data.** Put shapefiles (`.shp` with their sidecar files) and GeoTIFFs
+(`.tif`) anywhere under `./data`, in any folder layout, and run `make init`.
+Every file becomes a published, styled GeoServer layer. You can also upload a
+zipped shapefile from the web UI at <http://localhost:8000/upload>.
+
+> **Using the Italian demo data?** It is open data and is not bundled in this
+> repo, because `data/` is gitignored. Download it from
+> [ISPRA IdroGEO open data](https://idrogeo.isprambiente.it/app/page/open-data)
+> (IFFI inventory, PAI landslide and flood hazard mosaics) and
+> [ISTAT administrative boundaries](https://www.istat.it/it/archivio/222527),
+> unzip it into `./data`, and run `make init`.
+
+---
+
+## Use it from your AI assistant (MCP)
+
+The [Model Context Protocol](https://modelcontextprotocol.io) is an open standard
+that lets AI assistants use external tools. mcp-geo-server exposes **one smart
+tool**, `geoserver-agent`, that takes a plain-language `task`. Behind it, an agent
+built with the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
+chooses among **33 GeoServer operations**.
+
+**Claude Desktop** (or any MCP client that runs a local process), in
+`claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "geoserver": {
+      "command": "mcp-geo-server",
+      "env": {
+        "GEOSERVER_URL": "http://localhost:8080/geoserver",
+        "GEOSERVER_USER": "admin",
+        "GEOSERVER_PASSWORD": "geoserver",
+        "GEO_LLM_PROVIDER": "ollama",
+        "OLLAMA_LLM_MODEL": "qwen2.5"
+      }
+    }
+  }
+}
+```
+
+The `mcp-geo-server` command comes from `pip install -e .` (see
+[Local development](#local-development-no-docker)).
+
+**Over HTTP from your own code** (the Docker stack already runs this server on
+port 9000):
+
+```python
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
+
+async with streamablehttp_client("http://localhost:9000/mcp") as (r, w, _):
+    async with ClientSession(r, w) as s:
+        await s.initialize()
+        res = await s.call_tool("geoserver-agent",
+                                {"task": "List the workspaces and how many layers each has"})
+        print(res.content[0].text)
+```
+
+> 🔒 **Safe by default.** Destructive operations (deleting layers, stores and
+> styles, and WFS-T edits) are blocked by a guard in front of the tools unless
+> you set `GEO_ALLOW_DESTRUCTIVE=true`.
+
+---
+
+## Architecture
+
+All components share **one async core** (`GeoServerClient` plus the `geo_*`
+functions): the MCP agent, the web UI and the data bootstrap. Only that core
+talks to GeoServer.
+
+```mermaid
+flowchart LR
+    user([🧑 You]) -->|plain language| webui
+    assistant([🤖 Claude Desktop / IDE / your agent]) -->|MCP| mcp
+
+    subgraph stack [Docker stack]
+        webui["💬 Web UI<br/>FastAPI + Leaflet<br/>:8000"]
+        mcp["🧠 MCP server<br/>Microsoft Agent Framework<br/>:9000"]
+        core["⚙️ Shared core<br/>GeoServerClient + 33 geo_* tools"]
+        geoserver[("🗺️ GeoServer<br/>WMS · WFS · REST<br/>:8080")]
+        postgis[("🐘 PostGIS<br/>:5432")]
+        init["📦 geo-init<br/>one-shot loader"]
+    end
+
+    llm{{"LLM<br/>Ollama · Claude · OpenAI-compatible"}}
+    data[/"📁 ./data<br/>shapefiles + GeoTIFF"/]
+
+    webui --> core
+    mcp --> core
+    core -->|REST / OGC| geoserver
+    webui -.->|resolve request| llm
+    mcp -.->|reason + call tools| llm
+    geoserver --> postgis
+    data --> init
+    init -->|ogr2ogr| postgis
+    init -->|publish + style| geoserver
+    geoserver -. reads rasters .-> data
+```
+
+### What happens when you ask
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as You
+    participant UI as Web UI
+    participant GS as GeoServer
+    participant AI as LLM resolver
+    U->>UI: "Very high landslide hazard in Campania"
+    UI->>GS: WMS GetCapabilities (cached)
+    GS-->>UI: every layer's name, title, abstract, keywords
+    UI->>AI: catalog + filterable attributes + request
+    AI-->>UI: {layers, cql_filter, explanation} (JSON only)
+    UI->>UI: drop unknown layers · order rasters below vectors<br/>scope to admin area · per-layer CQL
+    UI->>GS: WMS GetMap (through the /wms proxy)
+    GS-->>UI: map tiles + legend
+    UI-->>U: map, zoom, legend and a plain-language summary
+```
+
+---
+
+## How the AI picks layers
+
+`POST /api/ask` maps a request to layers with **no hardcoded vocabulary**:
+
+1. **The catalog comes from GeoServer.** The WMS GetCapabilities document gives
+   each published layer's real `name`, `title`, `abstract` and `keywords`.
+2. **A small LLM "resolver" matches the request.** It has no tools and replies
+   in JSON only, with the layer name(s), an optional `cql_filter` and a short
+   explanation. Names that are not in the catalog are dropped, so a made-up
+   layer can never reach the map.
+3. **Filters use real values.** The style config lists the filterable
+   attributes, their allowed values and the layers that carry them. With that,
+   the resolver writes a filter like `per_fr_ita = 'Elevata P3'` for "high
+   hazard", on a layer that really has that attribute.
+
+The server then prepares the result for any map client:
+
+- **Draw order.** Layers come back bottom to top: rasters under vectors, the
+  broadest raster lowest. An opaque raster never hides the vectors.
+- **Admin-area scoping.** If you name a *comune*, *provincia* or *regione* (from
+  the ISTAT boundary layers), the response includes the zoom `bbox` and a way to
+  limit each layer to that area. Rasters get an exact-polygon `clip`. Vectors
+  get a CQL `INTERSECTS` filter, which is robust on dense layers.
+- **Per-layer filters.** `cql_by_layer` applies a filter only to layers that
+  have the attribute, so one filter can't break the whole map.
+- **Terrain analysis.** If you ask about elevation, slope, aspect or curvature,
+  the selected vector layers are enriched from a DTM (`geo_enrich_from_dtm`) and
+  a ready-to-show summary is returned.
+
+Because it relies only on GeoServer metadata and config, it works with **any**
+GeoServer. Give your layers meaningful titles and keywords and, if you like,
+your own `data/styles.yml`.
+
+---
+
+## Bring your own data
+
+### Automatic loading
+
+The `geo-init` container runs on `make up`. It does three things:
+
+- loads **every** shapefile under `./data` into PostGIS and publishes it as a
+  GeoServer layer, reprojected to EPSG:4326;
+- registers **every** GeoTIFF, such as a DTM or DEM, as an *external* coverage
+  store. GeoServer reads the file in place, so nothing is copied;
+- applies the thematic styles.
+
+It is idempotent: running it again skips what already exists. Layer names come
+from the parent folder, and no particular layout is assumed.
+
+```mermaid
+flowchart LR
+    A["📁 ./data/**/*.shp"] -->|ogr2ogr → EPSG:4326| B[("PostGIS table")]
+    B -->|publish| C["GeoServer layer"]
+    D["📁 ./data/**/*.tif"] -->|optional COG + overviews| E["external coverage store"]
+    E --> C
+    C -->|"styles.yml (first match wins)"| F["🎨 styled layer"]
+```
+
+```bash
+make init          # load new files + (re)apply styles
 make init-force    # drop & reload tables that already exist
 make styles        # only (re)apply the thematic styles
-make init-logs     # tail the geo-init logs
+make init-logs     # follow the geo-init logs
 ```
+
+<details>
+<summary><b>Bootstrap settings</b> (<code>GEO_INIT_*</code>)</summary>
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -142,11 +402,14 @@ make init-logs     # tail the geo-init logs
 | `GEO_STYLES_CONFIG` | `/data/styles.yml` | Style config file (falls back to the packaged default if missing) |
 | `GEO_UPLOAD_WORKSPACE` / `GEO_UPLOAD_DATASTORE` | `uploads` / `uploads_pg` | Target for UI shapefile uploads |
 
-**Thematic styles are config-driven** — no SLD is hardcoded. Styles and the
-layer→style assignment live in a YAML file, so the **same engine serves any
-domain**. The active config is `data/styles.yml`; if absent, the packaged
-`mcp_geo_server/styles_default.yml` (ISPRA landslide/hazard domain) is the
-fallback.
+</details>
+
+### Styles from a YAML file
+
+No SLD is hardcoded. Styles and the rules that assign them to layers live in
+`data/styles.yml`. If that file is missing, the packaged ISPRA default
+(`src/mcp_geo_server/styles_default.yml`) is used. To restyle for another
+domain, edit the file and run `make styles`.
 
 ```yaml
 styles:                       # name -> SLD definition
@@ -169,107 +432,82 @@ assign:                       # ordered rules, FIRST match wins (by layer name)
   - {name_matches: "(dtm|dem)", style: dtm_elevation}
 ```
 
-`assign` rules match a layer **by name** (`name_contains` substring or
-`name_matches` regex) — purely name-based, so the styling engine carries no
-hardcoded vocabulary. The patterns are domain-specific *config*, not code. To
-restyle for another domain, edit `data/styles.yml` and run `make styles`.
+`assign` rules match a layer **by name**, with `name_contains` for a substring or
+`name_matches` for a regex. The patterns are config for your domain, not code.
 
-## 4. Natural-language layer resolution (domain-agnostic)
+---
 
-`POST /api/ask` maps a request to layers with **no hardcoded vocabulary**:
+## Choose your LLM
 
-1. The catalog is built from the **WMS GetCapabilities** document — every
-   published layer's real `name`, `title`, `abstract` and `keywords`.
-2. A lightweight LLM "resolver" (no GeoServer tools, JSON-only output) matches
-   the request against that metadata and returns the exact layer name(s), an
-   optional `cql_filter`, and a short explanation. Hallucinated names are
-   dropped against the catalog.
-3. Filterable attributes (with their allowed values **and the layers they live
-   on**) are derived from the style config and passed to the resolver, so it
-   builds a CQL on real values and picks a layer that actually has the attribute
-   (e.g. `per_fr_ita = 'Elevata P3'` for *"alta pericolosità"* → the hazard
-   layer, not a landslide-inventory one).
-
-The server does the rest — the response is ready for any map client:
-
-- **Draw order** — `layers` come back bottom→top (rasters below vectors;
-  broadest raster lowest) with a `kind` per layer, so an opaque raster never
-  hides the vectors.
-- **Admin-area scoping** — if the request names a *comune / provincia / regione*
-  (ISTAT boundary layers), the response carries the zoom `bbox` and, per layer,
-  the way to restrict it to that area: rasters get an exact-polygon `clip`,
-  vectors get a CQL `INTERSECTS` spatial filter (a robust predicate — no
-  geometry overlay, so no JTS *non-noded intersection* failure on dense layers).
-- **Per-layer CQL** — `cql_by_layer` only applies a filter to layers that have
-  the attribute, so one filter can't fail the whole render.
-- **Terrain enrichment** — if the request names a metric (quota / slope / aspect
-  / curvature), the selected vector layers are enriched from a DTM
-  (`geo_enrich_from_dtm`) and a ready-to-show summary is returned.
-
-Because it relies on GeoServer metadata + config, it works for **any** GeoServer
-— just publish layers with meaningful titles/keywords (and, optionally, your own
-`data/styles.yml`).
-
-## 5. The intelligent MCP server (Microsoft Agent Framework)
-
-The MCP server is an **agent**, not a flat list of tools. `server.py` builds a
-GeoServer agent (`agent.py`: a chat client + the `geo_*` functions as tools) and
-exposes it with `agent.as_mcp_server()`. The MCP client therefore sees **one**
-tool, `geoserver-agent`, that takes a natural-language `task`.
-
-Run it over either transport (selected by `GEO_MCP_TRANSPORT`):
-
-```bash
-# stdio (for MCP clients that spawn the process, e.g. Claude Desktop)
-mcp-geo-server
-
-# streamable-HTTP (long-lived, visible container) at http://localhost:9000/mcp
-GEO_MCP_TRANSPORT=http mcp-geo-server
-```
-
-In Docker the `mcp` service runs it over HTTP. Example MCP client call:
-
-```python
-from mcp.client.streamable_http import streamablehttp_client
-from mcp import ClientSession
-
-async with streamablehttp_client("http://localhost:9000/mcp") as (r, w, _):
-    async with ClientSession(r, w) as s:
-        await s.initialize()
-        res = await s.call_tool("geoserver-agent",
-                                {"task": "How many features are in topp:states?"})
-        print(res.content[0].text)
-```
-
-### Choosing the LLM backend (`GEO_LLM_PROVIDER`)
+Set `GEO_LLM_PROVIDER`:
 
 | Provider | Value | Needs | Notes |
 |---|---|---|---|
-| Host Ollama | `ollama` | host Ollama running | Default. No API key; `make ollama-pull` on the host. Containers reach it via `host.docker.internal`. |
+| Local Ollama | `ollama` | Ollama running on the host | Default. No API key; `make ollama-pull`. Containers reach it via `host.docker.internal`. |
 | Ollama Cloud | `ollama-cloud` | `OLLAMA_API_KEY` | Hosted models; set `OLLAMA_LLM_MODEL` to a cloud model. `make up-ollama-cloud`. |
 | Anthropic Claude | `anthropic` | `ANTHROPIC_API_KEY` | Uses `ANTHROPIC_MODEL`. `make up-claude`. |
-| OpenAI-compatible | `openai` | `OPENAI_LLM_MODEL` | Any `/v1` endpoint: an inference gateway (LiteLLM), llama-server / llama-swap, vLLM, or OpenAI itself. Set `OPENAI_BASE_URL` for anything but OpenAI. |
+| OpenAI-compatible | `openai` | `OPENAI_LLM_MODEL` | Any `/v1` endpoint: LiteLLM, llama-server / llama-swap, vLLM, or OpenAI itself. Set `OPENAI_BASE_URL` for anything but OpenAI. |
 
-The `ollama` and `ollama-cloud` providers speak Ollama's **own** `/api/chat`
-protocol, not the OpenAI shape. An inference gateway that exposes
-`/v1/chat/completions` therefore needs `GEO_LLM_PROVIDER=openai`; pointing
-`OLLAMA_HOST` at it fails on the URL, before the model is ever consulted.
+The `ollama` and `ollama-cloud` providers use Ollama's **own** `/api/chat`
+protocol. A gateway that exposes `/v1/chat/completions` needs
+`GEO_LLM_PROVIDER=openai`. If you point `OLLAMA_HOST` at it instead, the call
+fails on the URL before the model is ever reached.
 
-The model is read from **`OLLAMA_LLM_MODEL`** (falls back to `OLLAMA_MODEL`),
-or from **`OPENAI_LLM_MODEL`** under the `openai` provider.
-Put your per-machine config in **`.env.local`** (loaded by the Makefile and
-gitignored), e.g. `OLLAMA_LLM_MODEL=llama3.2:3b`.
+The model is read from **`OLLAMA_LLM_MODEL`** (falls back to `OLLAMA_MODEL`), or
+from **`OPENAI_LLM_MODEL`** for the `openai` provider. Put per-machine settings
+in **`.env.local`**, which the Makefile loads and git ignores, for example
+`OLLAMA_LLM_MODEL=llama3.2:3b`.
 
-## 6. Install (local dev, no Docker)
+---
 
-```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,webui]"
-cp .env.example .env.local   # then edit
-uvicorn webui.app:app --reload --port 8000   # run the UI locally
-```
+## Who is this for?
 
-## 7. Configuration (environment variables)
+- 🏛️ **Public agencies and civil protection.** Let analysts and decision-makers
+  ask about hazard, land use or infrastructure layers without learning GIS
+  tools.
+- 🧑‍💻 **GIS developers.** Get a ready-made Docker stack (PostGIS, GeoServer,
+  automatic loading, styles) and an agent you can script.
+- 🤖 **AI and agent builders.** Give your assistant real geospatial skills
+  through one MCP tool.
+- 🎓 **Teachers and researchers.** Explore open geodata in a classroom or a
+  paper, by just asking.
+
+---
+
+## Reference
+
+<details>
+<summary><b>Docker services</b></summary>
+
+| Service | Container | Endpoint / role |
+|---|---|---|
+| `webui` | `mcp-geo-server-webui` | <http://localhost:8000> — chat + map UI (also proxies WMS) |
+| `mcp` | `mcp-geo-server-mcp` | <http://localhost:9000/mcp> — intelligent MCP server (streamable-HTTP) |
+| `geoserver` | `mcp-geo-server-geoserver` | <http://localhost:8080/geoserver> (admin / `geoserver`) |
+| `postgis` | `mcp-geo-server-postgis` | `localhost:5432` (gis / gis / gis) |
+| `geo-init` | `mcp-geo-server-init` | one-shot: load `./data` + apply styles, then exits |
+
+The LLM is contacted only when needed, so it never blocks startup. GeoServer
+runs with `CORS_ENABLED=true`. The web UI also proxies WMS at `GET /wms`: it
+forwards GetMap and GetLegendGraphic over the internal network and retries on
+`429`. The browser therefore never talks to GeoServer directly: everything stays
+same-origin, with no CORS.
+
+**Native images on every machine.** The Makefile picks base images with
+`uname -m`, so they run without emulation on both Apple Silicon and Intel:
+
+| Host arch | PostGIS | GeoServer | GeoServer data dir |
+|---|---|---|---|
+| `arm64` / `aarch64` | `imresamu/postgis:16-3.4` | `kartoza/geoserver:2.28.0` | `/opt/geoserver/data_dir` |
+| `amd64` | `postgis/postgis:16-3.4` | `docker.osgeo.org/geoserver:2.28.0` | `/opt/geoserver_data` |
+
+Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
+`docker compose` (without `make`) uses the multi-arch images.
+
+</details>
+
+<details>
+<summary><b>All environment variables</b></summary>
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -292,42 +530,18 @@ uvicorn webui.app:app --reload --port 8000   # run the UI locally
 | `OPENAI_API_KEY` | _(none)_ | Required for OpenAI; optional for a keyless gateway |
 | `GEO_MCP_TRANSPORT` / `GEO_MCP_HOST` / `GEO_MCP_PORT` | `stdio` / `0.0.0.0` / `9000` | MCP transport + bind |
 | `GEO_ALLOW_DESTRUCTIVE` | `false` | Allow destructive tools (`geo_delete_*`, `geo_wfs_transaction`) |
+| `GEO_LOG_LEVEL` | `INFO` | Log level of the `mcp_geo_server` logger |
 
-Data-bootstrap (`GEO_INIT_*`, `GEO_STYLES_CONFIG`, `GEO_UPLOAD_*`) and image
-(`POSTGIS_IMAGE`, `GEOSERVER_IMAGE`, `GEOSERVER_DATA_DIR`) knobs are documented in
-§3 and §1. Secrets are never hardcoded — everything is read from the environment.
+Bootstrap settings are listed in [Bring your own data](#bring-your-own-data).
+No secret is hardcoded: everything is read from the environment.
 
-## 8. Tests
+</details>
 
-```bash
-pytest                                            # unit + behavioural (no GeoServer)
-GEO_RUN_INTEGRATION=1 pytest tests/integration    # live round-trip vs real GeoServer
-```
+<details>
+<summary><b>The 33 agent tools</b></summary>
 
-- `test_formatting`, `test_styles_helpers`, `test_ogc_helpers`, `test_map_template`
-  — pure helpers / template rendering.
-- `test_tools_behaviour` — every tool driven with a `FakeClient`, asserting on
-  request bodies / params / WFS-T XML (no network).
-- `test_catalog` — WMS-capabilities parsing + LLM-selection validation.
-- `test_styling` — config-driven SLD generation + name-based style assignment.
-- `tests/integration/test_live.py` — **skipped** unless `GEO_RUN_INTEGRATION=1`.
-- `tests/evals/geo_eval.xml` — read-only eval questions against sample data.
-
-## 9. CI/CD — published images (GHCR)
-
-`.github/workflows/docker-publish.yml` runs on push to `main` and on `v*` tags:
-it runs the test suite, then builds and pushes **multi-arch (amd64 + arm64)**
-images to the GitHub Container Registry:
-
-| Image | Stage | Contents |
-|---|---|---|
-| `ghcr.io/<owner>/mcp-geo-server:latest` | `base` | app image (web UI + MCP agent) |
-| `ghcr.io/<owner>/mcp-geo-server:bootstrap` | `bootstrap` | adds GDAL (`ogr2ogr`) + `psql` for data init / upload |
-
-## Agent tools (33 `geo_*` functions)
-
-These are the tools the agent calls internally (they are not exposed
-individually over MCP — the agent is). `make tools` lists them.
+These are the tools the agent calls internally. They are not exposed one by one
+over MCP: the agent is. Run `make tools` to list them.
 
 | Tool | Kind | Description |
 |---|---|---|
@@ -365,25 +579,30 @@ individually over MCP — the agent is). `make tools` lists them.
 | `geo_wfs_transaction` | write | WFS-T delete / update / raw |
 | `geo_build_web_map` | read | Generate a Leaflet HTML map (OSM + WMS overlays) |
 
-### Destructive-operation safety
+**Destructive-operation guard.** A Microsoft Agent Framework function
+middleware (`DestructiveGuard`, in `middleware.py`) intercepts `geo_delete_*`
+and `geo_wfs_transaction`. Unless `GEO_ALLOW_DESTRUCTIVE=true`, the call is
+stopped and the agent reports a refusal. The guard is deterministic, so it works
+even though the MCP server cannot ask for confirmation.
 
-A Microsoft Agent Framework **function middleware** (`middleware.py`,
-`DestructiveGuard`) intercepts destructive tools (`geo_delete_*` and
-`geo_wfs_transaction`). Unless `GEO_ALLOW_DESTRUCTIVE=true`, the call is
-short-circuited and the agent reports a refusal instead of mutating data — a
-deterministic guard that works even though the MCP server is non-interactive.
+</details>
 
-## Resilience
+<details>
+<summary><b>Resilience</b></summary>
 
-- **Retry with linear backoff** on connect errors, timeouts, and HTTP
-  502/503/504 (`GEOSERVER_RETRIES`, `GEOSERVER_RETRY_BACKOFF`); the WMS proxy
+- **Retry with linear backoff** on connection errors, timeouts and HTTP
+  502/503/504 (`GEOSERVER_RETRIES`, `GEOSERVER_RETRY_BACKOFF`). The WMS proxy
   also retries on `429`.
-- **Actionable errors**: 401/403/404/405/409/500 translated into messages with a
-  suggested fix.
-- **OGC exceptions**: `ServiceExceptionReport` (HTTP 200) detected and raised.
+- **Actionable errors.** HTTP 401/403/404/405/409/500 come back as messages with
+  a suggested fix.
+- **OGC exceptions.** A `ServiceExceptionReport` returned with HTTP 200 is
+  detected and raised.
 - **Logging** on the `mcp_geo_server` logger (`GEO_LOG_LEVEL=DEBUG`).
 
-## Project layout
+</details>
+
+<details>
+<summary><b>Project layout</b></summary>
 
 ```
 src/mcp_geo_server/
@@ -396,13 +615,99 @@ src/mcp_geo_server/
   bootstrap.py     batch loader over ./data (compose service geo-init)
   catalog.py       domain-agnostic catalog (WMS caps) + NL-selection validation
   styling.py       config-driven SLD engine + name-based assignment
+  enrich.py        terrain metrics sampled from a DTM
   styles_default.yml  default (ISPRA) style config
 webui/
   app.py           FastAPI backend (chat /api/ask, /api/upload, /wms proxy, …)
   static/          chat+map UI (index.html) + upload page (upload.html)
-data/              your shapefiles + optional styles.yml (gitignored)
+data/              your shapefiles / GeoTIFFs + optional styles.yml (gitignored)
+docs/              images, examples, design notes
 tests/             unit, behavioural, catalog, styling, integration, evals
 Dockerfile         multi-stage: base (app) + bootstrap (adds GDAL/psql)
 docker-compose.yml postgis + geoserver + geo-init + webui + mcp
 .github/workflows/ docker-publish.yml — build & push multi-arch images to GHCR
 ```
+
+</details>
+
+---
+
+## Local development (no Docker)
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev,webui]"
+cp .env.example .env.local                   # then edit
+uvicorn webui.app:app --reload --port 8000   # run the UI locally
+
+# the MCP server, either transport
+mcp-geo-server                               # stdio (spawned by the MCP client)
+GEO_MCP_TRANSPORT=http mcp-geo-server        # streamable HTTP on :9000/mcp
+```
+
+Run `make help` to list every shortcut: install, test, up and down, logs, image
+builds, and more.
+
+### Tests
+
+```bash
+pytest                                            # unit + behavioural, no GeoServer needed
+GEO_RUN_INTEGRATION=1 pytest tests/integration    # live round-trip against a real GeoServer
+```
+
+- `test_tools_behaviour` drives every tool with a `FakeClient` and checks
+  request bodies, params and WFS-T XML, with no network.
+- `test_catalog` covers WMS-capabilities parsing and validation of the LLM's
+  layer choice.
+- `test_styling` covers SLD generation from config and name-based style
+  assignment.
+- `test_coveragestores` covers GeoTIFF / DTM publishing and raster discovery.
+- `tests/evals/geo_eval.xml` holds read-only evaluation questions against sample
+  data.
+
+### CI/CD
+
+On every push to `main` and on `v*` tags,
+`.github/workflows/docker-publish.yml` runs the tests and then publishes
+**multi-arch (amd64 + arm64)** images to GitHub Container Registry:
+
+| Image | Contents |
+|---|---|
+| `ghcr.io/agent-engineering-studio/mcp-geo-server:latest` | app image (web UI + MCP agent) |
+| `ghcr.io/agent-engineering-studio/mcp-geo-server:bootstrap` | adds GDAL (`ogr2ogr`) + `psql` for data loading / upload |
+
+---
+
+## Contributing
+
+Contributions are welcome, and you don't need to be a GIS expert:
+
+- ⭐ **Star the repo** if you find it useful. It helps others find it.
+- 🐛 **Open an issue** for a bug, a confusing answer from the agent, or a
+  dataset that doesn't load.
+- 🗺️ **Share a map.** Point it at your own GeoServer and tell us what you asked.
+  Screenshots of other domains (forestry, urban planning, energy…) are very
+  welcome.
+- 🔧 **Send a PR.** Run `pytest` first. New tools go in `src/mcp_geo_server/tools/`
+  with a behaviour test.
+
+The roadmap for the next MCP protocol revision is in
+[`docs/mcp-2026-07-28-upgrade-plan.md`](docs/mcp-2026-07-28-upgrade-plan.md).
+
+## Credits & data
+
+- Map server: [GeoServer](https://geoserver.org) · database:
+  [PostGIS](https://postgis.net) · map UI: [Leaflet](https://leafletjs.com) +
+  [OpenStreetMap](https://www.openstreetmap.org/copyright)
+- Agent: [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
+  · protocol: [Model Context Protocol](https://modelcontextprotocol.io)
+- Demo data: [ISPRA](https://www.isprambiente.gov.it) — IFFI landslide
+  inventory and the national PAI landslide and flood hazard mosaics
+  ([IdroGEO](https://idrogeo.isprambiente.it));
+  [ISTAT](https://www.istat.it) administrative boundaries 2023;
+  [CORINE Land Cover 2018](https://land.copernicus.eu/en/products/corine-land-cover).
+  Each dataset keeps its own licence.
+
+## License
+
+[MIT](LICENSE) © 2026 Agent Engineering Studio
