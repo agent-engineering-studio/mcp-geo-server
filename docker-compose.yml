@@ -101,6 +101,10 @@ services:
       # same workspace as the vectors by default.
       GEO_INIT_RASTER_ENABLE: ${GEO_INIT_RASTER_ENABLE:-true}
       GEO_INIT_RASTER_WORKSPACE: ${GEO_INIT_RASTER_WORKSPACE:-}
+      # Comma-separated globs (relative to /data) to limit which rasters are
+      # published, e.g. GEO_INIT_RASTER_EXCLUDE=dtm/*,clc2018_it/*.
+      GEO_INIT_RASTER_INCLUDE: ${GEO_INIT_RASTER_INCLUDE:-}
+      GEO_INIT_RASTER_EXCLUDE: ${GEO_INIT_RASTER_EXCLUDE:-}
       # COG preprocessing (overviews). Off by default: rewriting a large DTM is
       # slow and doubles disk. Turn on for big rasters so WMS stays fast.
       GEO_INIT_RASTER_PREPROCESS: ${GEO_INIT_RASTER_PREPROCESS:-false}

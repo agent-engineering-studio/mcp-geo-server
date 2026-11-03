@@ -22,6 +22,7 @@ Run as a one-shot container (compose service ``geo-init``)::
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import logging
 import os
 import shutil
@@ -45,6 +46,11 @@ from .ingest import (
 logger = logging.getLogger("mcp_geo_server.bootstrap")
 
 _TRUE = {"1", "true", "yes", "on"}
+
+
+def _env_globs(name: str) -> list[str]:
+    """Comma-separated glob list from the environment (blanks dropped)."""
+    return [g.strip() for g in (os.environ.get(name) or "").split(",") if g.strip()]
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -72,6 +78,14 @@ class BootstrapConfig:
         self.raster_enable = _env_bool("GEO_INIT_RASTER_ENABLE", True)
         self.raster_workspace = (os.environ.get("GEO_INIT_RASTER_WORKSPACE")
                                  or self.workspace).strip()
+        # Optional glob filters (comma-separated, relative to the data dir, e.g.
+        # ``dtm/*,clc2018_it/*``). A raster is published only if it matches an
+        # include pattern (when any is set) and no exclude pattern. Needed when
+        # GeoServer does not mount the data dir itself: an external coverage
+        # pointing at a file it cannot see is registered broken. Rasters kept
+        # only for per-cell analysis can be excluded this way.
+        self.raster_include = _env_globs("GEO_INIT_RASTER_INCLUDE")
+        self.raster_exclude = _env_globs("GEO_INIT_RASTER_EXCLUDE")
         # Optional Cloud-Optimized-GeoTIFF preprocessing (adds overviews so a
         # large DTM serves fast over WMS). Off by default: it rewrites each
         # raster (time + disk), which is only worthwhile for big rasters. The
@@ -127,13 +141,39 @@ def discover_shapefiles(data_dir: Path) -> list[Path]:
     return sorted(p for p in data_dir.rglob("*.shp") if p.is_file())
 
 
-def discover_rasters(data_dir: Path) -> list[Path]:
-    """Return every GeoTIFF (``*.tif`` / ``*.tiff``) under ``data_dir``, sorted.
+def _glob_match(rel: str, patterns: list[str]) -> bool:
+    """True if ``rel`` (POSIX path relative to the data dir) matches a pattern.
+
+    A pattern without ``/`` is also tried against the bare file name, so
+    ``HRDTM5m.tif`` works as well as ``dtm/HRDTM5m.tif``. ``*`` spans folders.
+    """
+    name = rel.rsplit("/", 1)[-1]
+    return any(fnmatch.fnmatchcase(rel, pat)
+               or ("/" not in pat and fnmatch.fnmatchcase(name, pat))
+               for pat in patterns)
+
+
+def discover_rasters(data_dir: Path, include: list[str] | None = None,
+                     exclude: list[str] | None = None) -> list[Path]:
+    """Return the GeoTIFFs (``*.tif`` / ``*.tiff``) under ``data_dir``, sorted.
 
     Case-insensitive, so ``.TIF`` from Windows-exported DTMs is found too.
+    ``include`` / ``exclude`` are glob lists matched against the path relative
+    to ``data_dir``: with ``include`` set only matching rasters are kept, and
+    anything matching ``exclude`` is dropped.
     """
-    return sorted(p for p in data_dir.rglob("*")
-                  if p.is_file() and p.suffix.lower() in (".tif", ".tiff"))
+    found = []
+    for p in data_dir.rglob("*"):
+        if not (p.is_file() and p.suffix.lower() in (".tif", ".tiff")):
+            continue
+        rel = p.relative_to(data_dir).as_posix()
+        if include and not _glob_match(rel, include):
+            continue
+        if exclude and _glob_match(rel, exclude):
+            logger.info("Raster %s excluded by GEO_INIT_RASTER_EXCLUDE.", rel)
+            continue
+        found.append(p)
+    return sorted(found)
 
 
 def layer_name_for(shp: Path) -> str:
@@ -224,7 +264,9 @@ async def run() -> int:
             logger.error("  FAILED %s: %s", shp.name, exc)
 
     # ---- rasters (GeoTIFF / DTM) -> external coverage stores --------------
-    rasters = discover_rasters(cfg.data_dir) if cfg.raster_enable else []
+    rasters = (discover_rasters(cfg.data_dir, cfg.raster_include,
+                                cfg.raster_exclude)
+               if cfg.raster_enable else [])
     if rasters:
         await ensure_workspace(cfg.raster_workspace)
         existing_cov = await list_coveragestore_names(cfg.raster_workspace)

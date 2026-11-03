@@ -136,6 +136,7 @@ make init-logs     # tail the geo-init logs
 | `GEO_INIT_FORCE` | `false` | Drop & reload existing tables |
 | `GEO_INIT_RASTER_ENABLE` | `true` | Register GeoTIFFs (`*.tif`/`*.tiff`) as coverage stores |
 | `GEO_INIT_RASTER_WORKSPACE` | _(vector workspace)_ | Workspace for the raster coverages |
+| `GEO_INIT_RASTER_INCLUDE` / `GEO_INIT_RASTER_EXCLUDE` | _(none)_ | Comma-separated globs relative to the data dir (e.g. `dtm/*,clc2018_it/*`) limiting which rasters are published. GeoServer must be able to read every published raster, so exclude the ones it does not mount |
 | `GEO_INIT_RASTER_PREPROCESS` | `false` | Rewrite each raster as a COG (overviews) for fast WMS — recommended for large DTMs |
 | `GEO_INIT_STYLES` | `true` | Apply the thematic styles after publishing |
 | `GEO_STYLES_CONFIG` | `/data/styles.yml` | Style config file (falls back to the packaged default if missing) |
