@@ -206,7 +206,12 @@ def raster_name_for(tif: Path, data_dir: Path | None = None) -> str:
         return sanitize(tif.stem)
     siblings = [p for p in tif.parent.glob("*")
                 if p.is_file() and p.suffix.lower() in (".tif", ".tiff")]
-    base = tif.parent.name if len(siblings) == 1 else f"{tif.parent.name}_{tif.stem}"
+    # A shapefile in the same folder already takes the folder name as its
+    # layer (``clc2018_it/CLC18_IT.shp`` -> ``clc2018_it``), and GeoServer
+    # refuses a second resource with that name in the workspace.
+    shares_folder = any(tif.parent.glob("*.shp"))
+    alone = len(siblings) == 1 and not shares_folder
+    base = tif.parent.name if alone else f"{tif.parent.name}_{tif.stem}"
     return sanitize(base)
 
 
