@@ -22,6 +22,8 @@ class LayerMeta:
     title: str = ""
     abstract: str = ""
     keywords: tuple[str, ...] = ()
+    # lat/lon extent (minx, miny, maxx, maxy) from the capabilities, if known
+    bbox: tuple[float, float, float, float] | None = None
 
     @property
     def qualified(self) -> str:
@@ -42,6 +44,7 @@ def build_catalog(entries: list[dict]) -> list[LayerMeta]:
             title=e.get("title", "") or "",
             abstract=e.get("abstract", "") or "",
             keywords=tuple(e.get("keywords", []) or ()),
+            bbox=tuple(e["bbox"]) if e.get("bbox") else None,
         ))
     return out
 
@@ -70,8 +73,21 @@ def parse_wms_capabilities(xml_text: str) -> list[dict]:
         children = list(el)
         name = title = abstract = ""
         keywords: list[str] = []
+        bbox = None
         for c in children:
             lt = _local(c.tag)
+            if lt == "EX_GeographicBoundingBox":          # WMS 1.3.0
+                vals = {_local(x.tag): (x.text or "").strip() for x in c}
+                try:
+                    bbox = [float(vals[k]) for k in ("westBoundLongitude",
+                            "southBoundLatitude", "eastBoundLongitude", "northBoundLatitude")]
+                except (KeyError, ValueError):
+                    bbox = None
+            elif lt == "LatLonBoundingBox":                # WMS 1.1.1
+                try:
+                    bbox = [float(c.get(k)) for k in ("minx", "miny", "maxx", "maxy")]
+                except (TypeError, ValueError):
+                    bbox = None
             if lt == "Name":
                 name = (c.text or "").strip()
             elif lt == "Title":
@@ -85,7 +101,7 @@ def parse_wms_capabilities(xml_text: str) -> list[dict]:
             continue  # container layer (no Name) — skip
         ws, _, bare = name.partition(":") if ":" in name else ("", "", name)
         layers.append({"name": bare, "workspace": ws, "title": title,
-                       "abstract": abstract, "keywords": keywords})
+                       "abstract": abstract, "keywords": keywords, "bbox": bbox})
     return layers
 
 

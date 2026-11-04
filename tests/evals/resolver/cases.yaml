@@ -286,3 +286,28 @@
     layers: [ispra:carta_geolitologica]
     forbid: [toscana]
     mode: new
+
+# ---- counting (the server counts; the model only says what) ---------------------------
+- id: quante-frane-toscana
+  tags: [aggregate]
+  query: quante frane poligonali ci sono in Toscana?
+  expect:
+    layers: [ispra:frane_poly_toscana_opendata]
+    cql: null
+    aggregate: {kind: count}
+
+- id: frane-per-tipo-campania
+  tags: [aggregate]
+  query: quante frane per tipo di movimento in Campania
+  expect:
+    layers: [ispra:frane_poly_campania_opendata]
+    accept: [ispra:frane_line_campania_opendata, ispra:frane_piff_campania_opendata]
+    aggregate: {kind: count_by, attribute: tipo_movim}
+
+- id: numero-aree-pai-elevata
+  tags: [aggregate, cql]
+  query: numero di aree a pericolosità da frana molto elevata
+  expect:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    cql: "per_fr_ita = 'Molto elevata P4'"
+    aggregate: {kind: count}

@@ -152,6 +152,10 @@ ai-metadata: install ## Let the LLM write title/abstract/keywords for published 
 ai-style: install ## Design a thematic style from a sentence (ARGS='ispra:LAYER "colora per ..." [--apply]')
 	$(PY) -m mcp_geo_server.style_ai $(ARGS)
 
+.PHONY: report
+report: install ## Fact sheet of an area with exact counts (ARGS='"provincia di Bari" --subject frane [--narrative] [--format html]')
+	$(PY) -m mcp_geo_server.report $(ARGS)
+
 .PHONY: eval-resolver
 eval-resolver: install ## Score the NL->layer resolver on the golden set with the configured LLM (ARGS="--record r.json", "--replay r.json", "--only cql")
 	$(PY) -m mcp_geo_server.evals $(ARGS)

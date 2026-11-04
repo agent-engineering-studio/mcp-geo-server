@@ -73,7 +73,12 @@ INSTRUCTIONS = (
     "le più pericolose\", \"aggiungi il DTM\", \"togli i crolli\"), mode is "
     "\"refine\" and layers/cql_filter are the COMPLETE new state: keep the "
     "current layers and filter unless the request changes them. A request about "
-    "a different subject is mode \"new\" and ignores the current map."
+    "a different subject is mode \"new\" and ignores the current map.\n"
+    "- aggregate: when the user asks HOW MANY (\"quante frane\", \"numero di\"), "
+    "kind \"count\"; when they ask how many PER class (\"per tipo\", \"divise per "
+    "pericolosità\"), kind \"count_by\" with the attribute to group by (one of "
+    "the filterable attributes); otherwise kind \"none\". Still select the layers "
+    "and filter as usual: the server does the counting."
 )
 
 METRICS = ("quota", "slope", "aspect", "curvature")
@@ -167,9 +172,18 @@ def selection_schema(catalog: list[LayerMeta]) -> dict:
             "mode": {"type": "string", "enum": ["new", "refine"]},
             "metrics": {"type": "array", "items": {"type": "string", "enum": list(METRICS)}},
             "place": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "aggregate": {
+                "type": "object",
+                "properties": {
+                    "kind": {"type": "string", "enum": ["none", "count", "count_by"]},
+                    "attribute": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+                },
+                "required": ["kind", "attribute"],
+                "additionalProperties": False,
+            },
         },
         "required": ["layers", "cql_filter", "explanation", "confidence",
-                     "mode", "metrics", "place"],
+                     "mode", "metrics", "place", "aggregate"],
         "additionalProperties": False,
     }
 
@@ -372,6 +386,8 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
         selection["metrics"] = [m for m in METRICS if m in (reply.get("metrics") or [])]
         place = reply.get("place")
         selection["place"] = place.strip() if isinstance(place, str) and place.strip() else None
+        from .analytics import clean_aggregate
+        selection["aggregate"] = clean_aggregate(reply.get("aggregate"))
         selection["structured"] = used_structured
         selection["raw"] = text
         selection["candidates"] = len(shown)

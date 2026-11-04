@@ -18,7 +18,7 @@ Documento redatto il 2026-11-04. Stato del codice analizzato: commit `effbdba`.
 | 3 — retrieval per famiglie, router di modelli, prompt caching | review: #14 → in `main` con questa PR | #14, #16 |
 | 4 — chat a più turni, intent dal modello, stili da testo | review: #15 → in `main` con questa PR | #15, #16 |
 | 5 — tool MCP di alto livello, server MCP v2 tipizzato | in review | #17 |
-| 6 — analitica, report, QA visivo | da fare | — |
+| 6 — conteggi esatti, report d'area | in review | #18 |
 
 Nota: nessuna fase ha ancora una baseline misurata su un LLM reale; il primo
 passo dopo il merge è `make eval-resolver ARGS="--record runs/<modello>.json"`.
@@ -243,6 +243,15 @@ Oggi la chat *mostra* layer; non risponde a domande quantitative. Due livelli:
    solo per le tabelle pubblicate. Il risultato può essere pubblicato come layer
    temporaneo (SQL view GeoServer) per vederlo sulla mappa.
 
+> **Stato (fase 6, #18).** Fatto il livello 1: conteggi e conteggi per classe
+> esatti via WFS `hits` con gli stessi filtri della mappa (chat, MCP
+> `geo_count_features`). **Text-to-SQL rinviato di proposito**: senza una
+> baseline misurata del resolver su un modello reale non c'è modo di sapere
+> quanto spesso produrrebbe query sbagliate ma plausibili, e una risposta
+> numerica sbagliata è peggio di nessuna risposta. Prerequisiti per riaprirlo:
+> eval del resolver ≥ 0,9 exact sul modello scelto, un golden set di domande
+> spaziali con risposta nota, ruolo PostGIS read-only dedicato.
+
 ### 4.5 Report e narrativa automatica
 
 A partire dalla selezione corrente: statistiche descrittive, metriche DTM
@@ -269,7 +278,16 @@ che un client MCP non sa fare da solo:
 Più **MCP prompts** (template riusabili, es. "analisi rischio per comune") e il
 catalogo come **resource** (`geo://ws/layer`), già previsti dal piano.
 
+> **Stato (fase 6, #18).** Report d'area fatto (`report.py`): fatti
+> deterministici + sintesi LLM opzionale, scartata se cita un numero che non è
+> nei fatti.
+
 ### 4.7 QA visivo della mappa (multimodale)
+
+> **Rinviato.** Il controllo che conta di più, "la mappa è vuota dopo il
+> filtro", ora è coperto senza vision dai conteggi esatti; il resto (palette
+> illeggibili, raster che coprono vettori) richiede un modello vision e un set
+> di render di riferimento per essere misurabile.
 
 Dopo il render, un modello vision guarda il PNG della GetMap e segnala problemi
 che i controlli numerici non vedono: mappa vuota per un CQL troppo

@@ -515,6 +515,35 @@ admin:
 `admin: {}` turns area scoping off. A `styles.yml` with no `admin` section
 keeps the packaged ISTAT levels, and the log warns about it.
 
+### Counts and area reports
+
+**"Quante frane per tipo in provincia di Bari?"** The resolver only says
+*what* to count (`aggregate`: `count` or `count_by` an attribute). GeoServer
+does the counting, with one WFS `resultType=hits` request per class and the
+same filter the map uses (attribute CQL and the area's `INTERSECTS`). The
+numbers are exact, never sampled or computed by the model, and they match
+what is on screen. The chat shows them under the answer, and
+`geo_count_features` does the same over MCP without an LLM.
+
+**Area reports** (`mcp_geo_server/report.py`) build a fact sheet for an
+administrative unit:
+
+- the vector layers that overlap it (optionally on one subject), each with
+  its exact count inside the area and its breakdown per configured class;
+- the rasters covering it;
+- a Markdown or printable HTML rendering.
+
+```bash
+make report ARGS='"provincia di Bari" --subject frane'
+make report ARGS='"Valle d'\''Aosta" --narrative --format html > aosta.html'
+```
+
+Also available as `GET /api/report?place=…&subject=…&format=html|md|json` and
+as the MCP tool `geo_area_report`. `--narrative` adds a short LLM synthesis,
+which is **fact-checked**: if it quotes a number that is not in the facts (a
+percentage it computed, a date it made up), it is discarded and the report
+says why. The rest of the report never depends on the model.
+
 ### Styles from a sentence
 
 `mcp_geo_server/style_ai.py` turns *"colora le frane per tipo di movimento,

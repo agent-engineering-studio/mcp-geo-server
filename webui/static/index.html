@@ -240,6 +240,11 @@
           } else if (r.cql_rejected) {
             html += `<div class="layers"><small>Filtro «${escapeHtml(r.cql_rejected.filter)}» scartato (${escapeHtml(r.cql_rejected.reason)}): mostro i dati non filtrati.</small></div>`;
           }
+          // Exact counts (WFS hits with the map's own filters): display-ready text.
+          if (r.analysis && r.analysis.text) {
+            const lines = r.analysis.text.split("\n").map(escapeHtml);
+            html += `<div class="layers"><b>${lines[0]}</b><br>${lines.slice(1).join("<br>")}</div>`;
+          }
           // Terrain enrichment: the server returns a display-ready `text`
           // (title + per-layer sentence), so we just print it.
           if (r.enrichment && r.enrichment.text) {

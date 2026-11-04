@@ -71,6 +71,7 @@ class Case:
     tags: list[str] = field(default_factory=list)
     context: dict | None = None   # map state of a previous turn (follow-ups)
     mode: str | None = None       # expected "new" / "refine"; None = not scored
+    aggregate: dict | None = None  # expected {kind, attribute?}; None = not scored
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -83,7 +84,8 @@ def load_cases(path: Path) -> list[Case]:
             accept=list(exp.get("accept", [])), forbid=list(exp.get("forbid", [])),
             cql=exp["cql"] if "cql" in exp else UNCHECKED,
             tags=list(c.get("tags", [])),
-            context=c.get("context"), mode=exp.get("mode")))
+            context=c.get("context"), mode=exp.get("mode"),
+            aggregate=exp.get("aggregate")))
     ids = [c.id for c in cases]
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes:
@@ -152,12 +154,14 @@ class Score:
     model: str | None = None          # tier that answered
     escalated: bool = False
     mode_ok: bool | None = None       # None = not scored
+    aggregate_ok: bool | None = None  # None = not scored
     retrieval_miss: list[str] = field(default_factory=list)  # expected, not shown
 
     @property
     def passed(self) -> bool:
         return (self.error is None and self.exact and not self.forbidden
-                and self.cql_ok is not False and self.mode_ok is not False)
+                and self.cql_ok is not False and self.mode_ok is not False
+                and self.aggregate_ok is not False)
 
 
 def score_case(case: Case, selection: dict | None, *, error: str | None = None,
@@ -178,11 +182,17 @@ def score_case(case: Case, selection: dict | None, *, error: str | None = None,
         cql_ok = cql_signature(selection.get("cql_filter")) == cql_signature(case.cql)
     rejected = selection.get("cql_rejected") or {}
     mode_ok = None if case.mode is None else selection.get("mode") == case.mode
+    aggregate_ok = None
+    if case.aggregate is not None:
+        got = selection.get("aggregate") or {}
+        aggregate_ok = (got.get("kind") == case.aggregate.get("kind")
+                        and ("attribute" not in case.aggregate
+                             or got.get("attribute") == case.aggregate["attribute"]))
     return Score(case.id, precision, recall, exact, forbidden, cql_ok, error,
                  selection.get("structured"), latency_s, got,
                  selection.get("cql_filter"),
                  f"{rejected.get('filter')!r}: {rejected.get('reason')}" if rejected else None,
-                 mode_ok=mode_ok)
+                 mode_ok=mode_ok, aggregate_ok=aggregate_ok)
 
 
 def summarize(scores: list[Score]) -> dict:
@@ -278,6 +288,8 @@ def _print_report(scores: list[Score], summary: dict, out=sys.stdout) -> None:
             extra.append(f"retrieval_miss={s.retrieval_miss}")
         if s.mode_ok is False:
             extra.append("mode=wrong")
+        if s.aggregate_ok is False:
+            extra.append("aggregate=wrong")
         print(f"{mark}  {s.id:<34} P={s.precision:.2f} R={s.recall:.2f} "
               + " ".join(extra), file=out)
     print("\n" + json.dumps(summary, indent=2), file=out)

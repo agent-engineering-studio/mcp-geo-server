@@ -63,7 +63,7 @@ def test_schema_restricts_layers_to_catalog():
     schema = resolver.selection_schema(CATALOG)
     assert schema["properties"]["layers"]["items"]["enum"] == [m.qualified for m in CATALOG]
     assert set(schema["required"]) == {"layers", "cql_filter", "explanation", "confidence",
-                                       "mode", "metrics", "place"}
+                                       "mode", "metrics", "place", "aggregate"}
     assert schema["properties"]["metrics"]["items"]["enum"] == list(resolver.METRICS)
     assert schema["additionalProperties"] is False
 
