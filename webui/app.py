@@ -22,12 +22,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from mcp_geo_server.agent import _build_chat_client
-from mcp_geo_server.catalog import (
-    build_catalog,
-    catalog_prompt,
-    parse_wms_capabilities,
-    validate_selection,
-)
+from mcp_geo_server import cql as _cql
+from mcp_geo_server import resolver as _resolver
+from mcp_geo_server.catalog import build_catalog, parse_wms_capabilities
 from mcp_geo_server.styling import load_config as _load_style_config
 from mcp_geo_server.client import GeoServerError, get_client
 from mcp_geo_server.config import get_settings
@@ -72,36 +69,12 @@ app.add_middleware(BasicAuthMiddleware)
 
 # Lazily-built LLM resolver (no GeoServer tools — it only maps NL -> layer names).
 _RESOLVER = None
-_RESOLVER_INSTRUCTIONS = (
-    "You map an Italian (or English) natural-language map request to GeoServer "
-    "layers chosen from a catalog the user gives you. Reply with ONLY a single "
-    "JSON object, no prose, no code fences:\n"
-    '{"layers": ["<exact qualified name from the catalog>", ...], '
-    '"cql_filter": null, "explanation": "<one short sentence, in the user\'s '
-    'language>"}\n'
-    "Rules:\n"
-    "- pick ONLY names that appear verbatim in the catalog; match the request "
-    "against each layer's SUBJECT (its name, title and keywords).\n"
-    "- A place name (region/province/comune, e.g. \"Valle d'Aosta\", \"Bari\") "
-    "only restricts the AREA shown — the area clip is applied automatically "
-    "afterwards. Use the place to choose a layer ONLY when the requested subject "
-    "has per-place variants (e.g. landslide layers exist per region); otherwise "
-    "ignore the place when selecting. NEVER add a layer of a DIFFERENT subject "
-    "just because its name contains the place. Example: \"DTM della Valle "
-    "d'Aosta\" -> the DTM / elevation layer ONLY (subject = DTM), NOT the "
-    "landslide layers of Valle d'Aosta.\n"
-    "- return as FEW layers as possible — only those whose subject was asked "
-    "for; include several only when the request is genuinely ambiguous.\n"
-    "- cql_filter: when the user asks for a SUBSET by an attribute value (e.g. "
-    "'alta/elevata pericolosità'), build a CQL using ONLY the attributes and "
-    "EXACT values listed under 'Filterable attributes'; otherwise null. Never "
-    "invent layer, column or value names.\n"
-    "- an attribute exists ONLY on the layers matching its pattern in "
-    "'Filterable attributes'. If you build a cql_filter on an attribute, you "
-    "MUST select a layer whose name matches that attribute's pattern — e.g. a "
-    "hazard-class filter goes on the hazard layer, NOT on a landslide-inventory "
-    "layer that lacks that column."
-)
+_RESOLVER_INSTRUCTIONS = _resolver.INSTRUCTIONS
+# Schema-constrained replies (GEO_RESOLVER_STRUCTURED=false to turn off, e.g.
+# for a backend that rejects JSON-schema output; there is also an automatic
+# one-shot fallback when the constrained call fails).
+_RESOLVER_STRUCTURED = (os.environ.get("GEO_RESOLVER_STRUCTURED") or "true"
+                        ).strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _get_resolver():
@@ -520,52 +493,20 @@ class AskIn(BaseModel):
     query: str
 
 
-_FILTER_HINTS: str | None = None
+_FILTER_SPEC: _resolver.FilterSpec | None = None
 
 
-def _filter_hints() -> str:
+def _filter_spec() -> _resolver.FilterSpec:
     """Filterable attributes + allowed values, derived from the style config.
 
     Lets the LLM build a valid ``cql_filter`` (e.g. high hazard classes) using
-    real column names and exact values — generic, no domain hardcoding.
+    real column names and exact values, and lets the CQL guard reject anything
+    else — generic, no domain hardcoding.
     """
-    global _FILTER_HINTS
-    if _FILTER_HINTS is None:
-        cfg = _load_style_config()
-        styles = cfg.get("styles", {})
-        assign = cfg.get("assign", []) or []
-        attrs: dict[str, dict] = {}
-        style_attr: dict[str, str] = {}
-        for sname, spec in styles.items():
-            attr, classes = spec.get("attribute"), spec.get("classes")
-            if not (attr and classes):
-                continue
-            style_attr[sname] = attr
-            d = attrs.setdefault(attr, {"values": [], "patterns": set()})
-            for c in classes:
-                pair = (str(c.get("value")), str(c.get("label", "")))
-                if pair not in d["values"]:
-                    d["values"].append(pair)
-        # Attach the layer-name patterns (from the assign rules) each attribute
-        # lives on, so the resolver filters only layers that HAVE the attribute.
-        for rule in assign:
-            attr = style_attr.get(rule.get("style"))
-            pat = rule.get("name_contains") or rule.get("name_matches")
-            if attr and pat:
-                attrs[attr]["patterns"].add(str(pat))
-        if not attrs:
-            _FILTER_HINTS = ""
-        else:
-            lines = ["Filterable attributes — each exists ONLY on layers whose "
-                     "name matches the given pattern; to filter by it you MUST "
-                     "pick such a layer (use EXACT values in cql_filter):"]
-            for a, d in attrs.items():
-                vals = ", ".join(f"'{v}' ({lbl})" if lbl else f"'{v}'"
-                                 for v, lbl in d["values"])
-                pats = " | ".join(sorted(d["patterns"])) or "(any)"
-                lines.append(f"- {a} (layers matching: {pats}): {vals}")
-            _FILTER_HINTS = "\n".join(lines)
-    return _FILTER_HINTS
+    global _FILTER_SPEC
+    if _FILTER_SPEC is None:
+        _FILTER_SPEC = _resolver.filter_spec(_load_style_config())
+    return _FILTER_SPEC
 
 
 # ---- admin-area (comune / provincia / regione) spatial scoping -----------
@@ -757,13 +698,6 @@ def _metric_intent(query: str) -> list[str]:
     return sorted({v for k, v in _METRIC_HINTS.items() if k in toks})
 
 
-def _cql_attributes(cql: str) -> set[str]:
-    """Attribute names referenced by a CQL filter (identifiers before an op)."""
-    return set(re.findall(
-        r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|<>|!=|<=|>=|<|>|\bLIKE\b|\bILIKE\b|"
-        r"\bIN\b|\bBETWEEN\b|\bIS\b)", cql, re.I))
-
-
 @app.post("/api/ask")
 async def ask(body: AskIn) -> dict:
     """Map a natural-language request to layers via the LLM resolver.
@@ -776,12 +710,12 @@ async def ask(body: AskIn) -> dict:
         raise HTTPException(status_code=400, detail="empty query.")
 
     catalog = await _load_catalog()
-    prompt = (f"{catalog_prompt(catalog)}\n\n{_filter_hints()}\n\n"
-              f"Request: {query}\n\nJSON:")
+    spec = _filter_spec()
     try:
-        resolver = _get_resolver()
-        result = await resolver.run(prompt)
-        selection = validate_selection(result.text, catalog)
+        selection = await _resolver.resolve(
+            _get_resolver(), query, catalog, spec,
+            provider=get_settings().llm_provider,
+            structured=_RESOLVER_STRUCTURED, guard=False)
     except ValueError as exc:
         raise HTTPException(status_code=502,
                             detail=f"could not parse model reply: {exc}") from exc
@@ -842,10 +776,16 @@ async def ask(body: AskIn) -> dict:
     # that lacks the column makes GeoServer fail the ENTIRE render (that is why
     # "pericolosità elevata" over a landslide-inventory layer showed nothing).
     # The server decides, per layer, whether the filter applies.
+    # CQL guard: parse the model's filter, allow only the attributes the
+    # selected layers really have (style config + actual columns) and the exact
+    # configured values; otherwise drop it and say why (`cql_rejected`).
+    selection.pop("raw", None)
+    _resolver.guard_cql(selection, spec,
+                        {e["qualified"]: set(e.get("fields") or []) for e in info})
     cql = selection.get("cql_filter")
     cql_by_layer: dict[str, str] = {}
     if cql:
-        attrs = _cql_attributes(cql)
+        attrs = _cql.attributes(_cql.parse(cql))
         for e in info:
             fields = set(e.get("fields") or [])
             if attrs and attrs <= fields:

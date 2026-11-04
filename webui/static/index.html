@@ -222,6 +222,8 @@
               html += `<div class="layers"><small>Filtro applicato: ${escapeHtml(r.cql_filter)}</small></div>`;
             else
               html += `<div class="layers"><small>Filtro «${escapeHtml(r.cql_filter)}» non applicabile ai layer selezionati (attributo assente): mostro i dati non filtrati.</small></div>`;
+          } else if (r.cql_rejected) {
+            html += `<div class="layers"><small>Filtro «${escapeHtml(r.cql_rejected.filter)}» scartato (${escapeHtml(r.cql_rejected.reason)}): mostro i dati non filtrati.</small></div>`;
           }
           // Terrain enrichment: the server returns a display-ready `text`
           // (title + per-layer sentence), so we just print it.

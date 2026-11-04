@@ -323,14 +323,25 @@ sequenceDiagram
 
 1. **The catalog comes from GeoServer.** The WMS GetCapabilities document gives
    each published layer's real `name`, `title`, `abstract` and `keywords`.
-2. **A small LLM "resolver" matches the request.** It has no tools and replies
-   in JSON only, with the layer name(s), an optional `cql_filter` and a short
-   explanation. Names that are not in the catalog are dropped, so a made-up
-   layer can never reach the map.
+2. **A small LLM "resolver" matches the request.** It has no tools, and its
+   reply is constrained by a JSON Schema built for each request: the layer
+   names are an `enum` of the real catalog, so the model can't produce a layer
+   that doesn't exist. The reply carries the layer name(s), an optional
+   `cql_filter`, a short explanation and a `confidence`. If a backend rejects
+   the schema (some OpenAI-compatible servers do), the call is retried once
+   without it, and names not in the catalog are still dropped. Set
+   `GEO_RESOLVER_STRUCTURED=false` to skip the schema altogether.
 3. **Filters use real values.** The style config lists the filterable
    attributes, their allowed values and the layers that carry them. With that,
    the resolver writes a filter like `per_fr_ita = 'Elevata P3'` for "high
    hazard", on a layer that really has that attribute.
+4. **Filters are checked before they reach WMS** (`mcp_geo_server/cql.py`).
+   The filter is parsed into a small, attribute-only subset of CQL: no
+   functions and no spatial predicates. Its attributes must exist on the
+   selected layers and categorical values must be the exact configured ones.
+   It is then rewritten in canonical form. A filter that fails is dropped,
+   the map shows the unfiltered data, and the response says why
+   (`cql_rejected`).
 
 The server then prepares the result for any map client:
 
@@ -521,6 +532,7 @@ Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
 | `GEO_MAP_OUTPUT_DIR` | `./maps` | Where generated maps / downloaded PNGs are saved |
 | `WEBUI_PORT` | `8000` | Port for the web UI |
 | `WEBUI_USER` / `WEBUI_PASSWORD` | _(none)_ | When **both** are set, every web UI route except `/healthz` requires HTTP Basic auth |
+| `GEO_RESOLVER_STRUCTURED` | `true` | Constrain the chat resolver's reply with a JSON Schema (falls back automatically if the backend rejects it) |
 | `WEBUI_RATE_LIMIT` | `30` | Requests per minute per client IP on `/api/ask`, `/api/enrich`, `/api/upload` (`0` = off) |
 | `GEO_CATALOG_TTL` | `60` | Seconds the chat caches the WMS layer catalog (`0` = no cache); an upload refreshes it |
 | `GEO_LLM_PROVIDER` | `ollama` | `ollama`, `ollama-cloud`, `anthropic` or `openai` |
@@ -665,8 +677,30 @@ GEO_RUN_INTEGRATION=1 pytest tests/integration    # live round-trip against a re
 - `test_styling` covers SLD generation from config and name-based style
   assignment.
 - `test_coveragestores` covers GeoTIFF / DTM publishing and raster discovery.
+- `test_cql`, `test_resolver` and `test_webui_ask` cover the CQL guard, the
+  structured resolver call with its fallback, and the `/api/ask` wiring.
 - `tests/evals/geo_eval.xml` holds read-only evaluation questions against sample
   data.
+
+### Evaluating the resolver
+
+`tests/evals/resolver/cases.yaml` is a golden set of 30 Italian and English
+requests over a snapshot of a real ISPRA catalog (113 layers). It includes the
+known traps, such as "DTM della Valle d'Aosta" (DTM only, no landslide
+layers) and hazard filters that belong on the PAI layer. The runner scores layer precision and
+recall, exact match, forbidden layers, CQL by meaning, parse errors,
+structured-output fallbacks and latency:
+
+```bash
+make eval-resolver                                   # live, with the configured LLM
+make eval-resolver ARGS="--record runs/qwen.json"    # …and save the raw replies
+make eval-resolver ARGS="--replay runs/qwen.json"    # re-score offline, no LLM call
+make eval-resolver ARGS="--only cql --min-exact 0.9" # a subset, with a gate
+```
+
+Replay lets you re-score an old recording after changing the guard. It also
+lets you compare providers and models side by side. CI scores a synthetic
+recording, so the golden set and the scoring can't drift apart.
 
 ### CI/CD
 
