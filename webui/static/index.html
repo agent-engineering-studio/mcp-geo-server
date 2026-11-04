@@ -40,6 +40,7 @@
     #composer input { flex: 1; padding: 9px 11px; font-size: 14px; border: 1px solid #ccc; border-radius: 8px; }
     #composer button { padding: 9px 16px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; font-size: 14px; cursor: pointer; }
     #composer button:disabled { background: #9bb4ef; cursor: default; }
+    #composer button.ghost { background: #fff; color: #2563eb; border: 1px solid #c7d4f5; }
 
     #legend { position: absolute; right: 12px; bottom: 12px; z-index: 1000;
       background: rgba(255,255,255,0.94); border: 1px solid #ccc; border-radius: 6px;
@@ -72,6 +73,8 @@
       <input id="q" placeholder="Scrivi qui…" autocomplete="off"
              onkeydown="if(event.key==='Enter')send()" />
       <button id="sendbtn" onclick="send()">Invia</button>
+      <button id="resetbtn" class="ghost" onclick="resetMap()"
+              title="La prossima richiesta parte da una mappa vuota">Nuova mappa</button>
     </div>
   </div>
 
@@ -158,6 +161,17 @@
     }
     const escapeHtml = s => s.replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
+    // Map state of the last answer, sent back with the next request so a
+    // follow-up ("solo i crolli", "aggiungi il DTM") refines it. Kept only in
+    // the page: the server stores no conversation.
+    let mapState = null;
+    function resetMap() {
+      mapState = null;
+      clearWms();
+      renderLegend();
+      bubble("bot", "<i>Mappa azzerata: la prossima richiesta parte da zero.</i>");
+    }
+
     async function send() {
       const input = document.getElementById("q");
       const q = input.value.trim();
@@ -170,7 +184,7 @@
       try {
         const r = await api("/api/ask", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ query: q })
+          body: JSON.stringify({ query: q, context: mapState })
         });
         if (!r.layers || !r.layers.length) {
           thinking.innerHTML = (r.explanation ? escapeHtml(r.explanation) + "<br>" : "") +
@@ -201,6 +215,7 @@
           renderLegend();
 
           let html = escapeHtml(r.explanation || "Ecco i dati richiesti.");
+          if (r.mode === "refine") html = "<small>↻ mappa aggiornata</small><br>" + html;
           if (r.admin) html += ` <i>(ritagliato su ${escapeHtml(r.admin.level)} ${escapeHtml(r.admin.name)})</i>`;
           const descs = populated.map(l => {
             const i = info[l];
@@ -233,6 +248,8 @@
           }
           thinking.innerHTML = html;
           thinking.title = r.layers.join(", ");  // technical names on hover only
+          mapState = { layers: r.layers, cql_filter: r.cql_filter || null,
+                       admin: r.admin || null };
         }
       } catch (e) {
         thinking.className = "msg err";

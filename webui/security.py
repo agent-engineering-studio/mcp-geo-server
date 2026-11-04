@@ -10,7 +10,7 @@ working unchanged:
   every request, including the WMS tiles, so the UI needs no changes.
 * ``WEBUI_RATE_LIMIT`` — max requests per minute, per client IP, on the routes
   that spend LLM tokens or heavy compute (``/api/ask``, ``/api/enrich``,
-  ``/api/upload``). Default ``30``; ``0`` disables it.
+  ``/api/upload``, ``/api/style``). Default ``30``; ``0`` disables it.
 
 Pure Starlette, no I/O: unit-testable without GeoServer or an LLM.
 """
@@ -34,7 +34,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 AUTH_EXEMPT_PATHS = frozenset({"/healthz"})
 
 # Routes that cost LLM tokens or heavy compute — the ones worth throttling.
-RATE_LIMITED_PATHS = frozenset({"/api/ask", "/api/enrich", "/api/upload"})
+RATE_LIMITED_PATHS = frozenset({"/api/ask", "/api/enrich", "/api/upload", "/api/style"})
 
 _REALM = 'Basic realm="mcp-geo-server", charset="UTF-8"'
 

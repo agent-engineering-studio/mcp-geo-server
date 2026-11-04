@@ -63,8 +63,20 @@ INSTRUCTIONS = (
     "layer that lacks that column.\n"
     "- confidence: how sure you are that the layers (and filter) are what the "
     "user meant — low when the request is vague or nothing fits well. If "
-    "nothing in the catalog fits, return an empty layers list."
+    "nothing in the catalog fits, return an empty layers list.\n"
+    "- metrics: terrain metrics the user wants computed on the selected "
+    "features — any of quota (elevation/altitude), slope (pendenza, how steep), "
+    "aspect (esposizione/orientation), curvature; [] if none.\n"
+    "- place: the administrative place the request is about, as written "
+    "(e.g. \"provincia di Bari\"), or null.\n"
+    "- mode: when a 'Current map' is given and the request REFINES it (\"solo "
+    "le più pericolose\", \"aggiungi il DTM\", \"togli i crolli\"), mode is "
+    "\"refine\" and layers/cql_filter are the COMPLETE new state: keep the "
+    "current layers and filter unless the request changes them. A request about "
+    "a different subject is mode \"new\" and ignores the current map."
 )
+
+METRICS = ("quota", "slope", "aspect", "curvature")
 
 
 # ---- filterable attributes (from the style config) -------------------------
@@ -152,10 +164,45 @@ def selection_schema(catalog: list[LayerMeta]) -> dict:
             "cql_filter": {"anyOf": [{"type": "string"}, {"type": "null"}]},
             "explanation": {"type": "string"},
             "confidence": {"type": "number"},
+            "mode": {"type": "string", "enum": ["new", "refine"]},
+            "metrics": {"type": "array", "items": {"type": "string", "enum": list(METRICS)}},
+            "place": {"anyOf": [{"type": "string"}, {"type": "null"}]},
         },
-        "required": ["layers", "cql_filter", "explanation", "confidence"],
+        "required": ["layers", "cql_filter", "explanation", "confidence",
+                     "mode", "metrics", "place"],
         "additionalProperties": False,
     }
+
+
+# ---- conversation context ---------------------------------------------------------------
+def clean_context(context: Any, catalog: list[LayerMeta]) -> dict | None:
+    """The map state the client sends back, validated; None if empty/invalid.
+
+    ``{"layers": [...], "cql_filter": str|None, "admin": {...}|None}``. Unknown
+    layers are dropped (the catalog may have changed between turns).
+    """
+    if not isinstance(context, dict):
+        return None
+    known = {m.qualified for m in catalog}
+    layers = [str(q) for q in (context.get("layers") or []) if str(q) in known]
+    if not layers:
+        return None
+    cql = context.get("cql_filter")
+    admin = context.get("admin") if isinstance(context.get("admin"), dict) else None
+    return {"layers": layers, "cql_filter": cql if isinstance(cql, str) and cql else None,
+            "admin": admin}
+
+
+def context_prompt(context: dict | None) -> str:
+    if not context:
+        return ""
+    area = context.get("admin") or {}
+    lines = ["Current map (the user may be refining it):",
+             "- layers: " + ", ".join(context["layers"]),
+             f"- cql_filter: {context.get('cql_filter') or 'null'}"]
+    if area.get("name"):
+        lines.append(f"- area: {area.get('level', '')} {area['name']}".rstrip())
+    return "\n".join(lines)
 
 
 def response_format_for(provider: str, schema: dict) -> dict:
@@ -173,7 +220,8 @@ def response_format_for(provider: str, schema: dict) -> dict:
 
 
 def cached_prompt_parts(catalog: list[LayerMeta], hints: str, query: str, *,
-                        catalog_is_static: bool) -> tuple[dict, str]:
+                        catalog_is_static: bool,
+                        context: dict | None = None) -> tuple[dict, str]:
     """Anthropic prompt caching: (cacheable system block, per-request message).
 
     The static part — the full catalog (when retrieval did not narrow it, so it
@@ -188,6 +236,8 @@ def cached_prompt_parts(catalog: list[LayerMeta], hints: str, query: str, *,
     block = {"type": "text", "text": "\n\n".join(static) or "(no catalog context)",
              "cache_control": {"type": "ephemeral"}}
     dynamic = [] if catalog_is_static else [catalog_prompt(catalog)]
+    if context:
+        dynamic.append(context_prompt(context))
     dynamic.append(f"Request: {query}\n\nJSON:")
     return block, "\n\n".join(dynamic)
 
@@ -198,11 +248,14 @@ def prompt_cache_from_env() -> bool:
         "1", "true", "yes", "on"}
 
 
-def build_prompt(catalog: list[LayerMeta], hints: str, query: str) -> str:
+def build_prompt(catalog: list[LayerMeta], hints: str, query: str,
+                 context: dict | None = None) -> str:
     """Static-first ordering: catalog and hints change rarely, the query always."""
     parts = [catalog_prompt(catalog)]
     if hints:
         parts.append(hints)
+    if context:
+        parts.append(context_prompt(context))
     parts.append(f"Request: {query}\n\nJSON:")
     return "\n\n".join(parts)
 
@@ -247,7 +300,8 @@ def guard_cql(selection: dict, spec: FilterSpec,
 
 async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: FilterSpec,
                   *, provider: str, structured: bool = True, guard: bool = True,
-                  retriever: Any | None = None, prompt_cache: bool = False) -> dict:
+                  retriever: Any | None = None, prompt_cache: bool = False,
+                  context: dict | None = None) -> dict:
     """Run the resolver agent on ``query`` and return a validated selection.
 
     Result keys: ``layers``, ``cql_filter``, ``explanation``, ``confidence``,
@@ -264,23 +318,33 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
 
     ``prompt_cache`` (Anthropic only) sends the static part of the prompt as a
     cached system block (:func:`cached_prompt_parts`).
+
+    ``context`` is the current map state for a follow-up turn (see
+    :func:`clean_context`); the result then carries ``mode`` ``"refine"`` or
+    ``"new"``. Also returned: ``metrics`` and ``place`` read by the model.
     """
     with telemetry.span("geo.resolve", **{
             "gen_ai.provider.name": provider, "geo.catalog.size": len(catalog),
             "geo.query.length": len(query), "geo.structured.requested": structured,
     }) as sp:
+        context = clean_context(context, catalog)
         shown = catalog
         retrieval_reason = None
         narrowed = False
         if retriever is not None:
             r = retriever.retrieve(query, catalog)
             shown, retrieval_reason, narrowed = r.candidates, r.reason, r.applied
-        prompt = build_prompt(shown, spec.hints(), query)
+            if narrowed and context:
+                # The current layers must stay selectable (the schema enum).
+                keep = {m.qualified for m in shown} | set(context["layers"])
+                shown = [m for m in catalog if m.qualified in keep]
+        prompt = build_prompt(shown, spec.hints(), query, context)
         first_prompt, first_opts = prompt, {}
         use_cache = prompt_cache and provider == "anthropic"
         if use_cache:
             block, first_prompt = cached_prompt_parts(shown, spec.hints(), query,
-                                                      catalog_is_static=not narrowed)
+                                                      catalog_is_static=not narrowed,
+                                                      context=context)
             first_opts["instructions"] = [block]
         if structured:
             first_opts["response_format"] = response_format_for(provider,
@@ -303,6 +367,11 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
         requested = reply.get("layers") or []
         requested = [requested] if isinstance(requested, str) else requested
         selection["confidence"] = _confidence(reply)
+        selection["mode"] = ("refine" if context and reply.get("mode") == "refine"
+                             else "new")
+        selection["metrics"] = [m for m in METRICS if m in (reply.get("metrics") or [])]
+        place = reply.get("place")
+        selection["place"] = place.strip() if isinstance(place, str) and place.strip() else None
         selection["structured"] = used_structured
         selection["raw"] = text
         selection["candidates"] = len(shown)
@@ -319,6 +388,7 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
             "geo.retrieval.candidates": len(shown),
             "geo.retrieval.reason": retrieval_reason,
             "geo.prompt_cache": use_cache,
+            "geo.mode": selection["mode"],
         })
         return selection
 

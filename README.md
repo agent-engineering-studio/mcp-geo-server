@@ -365,6 +365,17 @@ sequenceDiagram
    applies when retrieval didn't narrow the catalog. The request shape is
    checked by a test with the real client; check the cache hit rate on your
    account before relying on it.
+8. **Follow-up turns refine the map.** The page sends the current map back with
+   the next request (`context`: layers, filter, area). The model then returns
+   the complete new state and `mode: "refine"`. For example, "frane in
+   Campania" → "solo i crolli" → "aggiungi il DTM" → "togli il DTM" keeps the
+   layers and filter you didn't change, and the area of the previous turn.
+   A new subject comes back as `mode: "new"`. The server holds no
+   conversation state, and **Nuova mappa** in the chat starts over.
+9. **The model also reads intent.** `metrics` (elevation, slope, aspect,
+   curvature) is merged with the keyword match, so "quanto sono ripide" asks
+   for slope. `place` is used when the exact name matcher finds no
+   administrative unit in the request.
 
 The server then prepares the result for any map client:
 
@@ -491,6 +502,27 @@ admin:
 
 `admin: {}` turns area scoping off. A `styles.yml` with no `admin` section
 keeps the packaged ISTAT levels, and the log warns about it.
+
+### Styles from a sentence
+
+`mcp_geo_server/style_ai.py` turns *"colora le frane per tipo di movimento,
+toni caldi"* into a categorical style. The model never writes SLD: it fills a
+`styles.yml` entry that the config engine compiles, in two constrained steps:
+
+1. It picks the attribute from the layer's real columns.
+2. It gives a label and a colour to that attribute's real distinct values,
+   which the server reads over WFS.
+
+The symbolizer type comes from the geometry, and colours must be `#RRGGBB`.
+
+```bash
+make ai-style ARGS='ispra:frane_line_molise_opendata "colora per tipo di movimento, toni caldi"'
+make ai-style ARGS='ispra:frane_line_molise_opendata "..." --apply'   # publish + set as default
+```
+
+The same is available as `POST /api/style` (`{layer, instruction, attribute?,
+apply?}`). The output includes the YAML to paste into `data/styles.yml`.
+Without it, the next `make styles` puts back whatever the config assigns.
 
 ### AI-written metadata
 
