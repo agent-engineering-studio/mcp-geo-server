@@ -1,0 +1,232 @@
+# Golden set for the NL -> layer resolver (scored by `python -m mcp_geo_server.evals`).
+#
+# Catalog: catalog_ispra.json (snapshot of a real ISPRA stack, 113 layers).
+# Filterable attributes: the packaged styles_default.yml.
+#
+# expect.layers  must all be selected (recall) and nothing else (precision)…
+# expect.accept  …except these, which are tolerated extras (not penalized).
+# expect.forbid  regexes: a selected layer matching one is a hard failure.
+# expect.cql     omitted = not scored; null = must be no filter; a string is
+#                compared by meaning (attribute -> values), not by text.
+#
+# Layer families: frane_poly (landslide polygons), frane_line (linear),
+# frane_piff (PIFF points), aree_poly (areas of diffuse landslides), dgpv_poly
+# (deep-seated gravitational deformations), mosaicatura_…_pai (PAI hazard,
+# attribute per_fr_ita), dtm, ISTAT boundaries (com/provcm/reg/ripgeo).
+
+# ---- subject + per-region variant -------------------------------------------
+- id: frane-lineari-molise
+  tags: [subject, region]
+  query: mostrami le frane lineari del Molise
+  expect:
+    layers: [ispra:frane_line_molise_opendata]
+    cql: null
+
+- id: frane-poligonali-marche
+  tags: [subject, region]
+  query: frane poligonali nelle Marche
+  expect:
+    layers: [ispra:frane_poly_marche_opendata]
+    cql: null
+
+- id: piff-puglia
+  tags: [subject, region]
+  query: punti di identificazione delle frane in Puglia
+  expect:
+    layers: [ispra:frane_piff_puglia_opendata]
+
+- id: dgpv-calabria
+  tags: [subject, region]
+  query: deformazioni gravitative profonde di versante in Calabria
+  expect:
+    layers: [ispra:dgpv_poly_calabria_opendata]
+
+- id: aree-frane-diffuse-sicilia
+  tags: [subject, region]
+  query: aree soggette a frane diffuse in Sicilia
+  expect:
+    layers: [ispra:aree_poly_sicilia_opendata]
+
+- id: frane-lineari-friuli
+  tags: [subject, region]
+  query: frane lineari in Friuli Venezia Giulia
+  expect:
+    layers: [ispra:frane_line_friuli_venezia_giulia_opendata]
+
+- id: frane-toscana-generico
+  tags: [subject, region, ambiguous]
+  query: frane in Toscana
+  expect:
+    layers: [ispra:frane_poly_toscana_opendata]
+    accept: [ispra:frane_line_toscana_opendata, ispra:frane_piff_toscana_opendata,
+             ispra:aree_poly_toscana_opendata, ispra:dgpv_poly_toscana_opendata]
+    forbid: [liguria, emilia, umbria, lazio, marche]
+
+- id: frane-trento
+  tags: [subject, region, ambiguous]
+  query: frane della provincia autonoma di Trento
+  expect:
+    layers: [ispra:frane_poly_trento_opendata]
+    accept: [ispra:frane_line_trento_opendata, ispra:frane_piff_trento_opendata,
+             ispra:aree_poly_trento_opendata, ispra:dgpv_poly_trento_opendata]
+    forbid: [bolzano]
+
+- id: landslides-south-tyrol-en
+  tags: [subject, region, english, ambiguous]
+  query: show me the landslides in South Tyrol
+  expect:
+    layers: [ispra:frane_poly_bolzano_opendata]
+    accept: [ispra:frane_line_bolzano_opendata, ispra:frane_piff_bolzano_opendata,
+             ispra:aree_poly_bolzano_opendata, ispra:dgpv_poly_bolzano_opendata]
+    forbid: [trento]
+
+- id: inventario-emilia
+  tags: [subject, region, ambiguous]
+  query: inventario delle frane dell'Emilia-Romagna
+  expect:
+    layers: [ispra:frane_poly_emilia_romagna_opendata]
+    accept: [ispra:frane_line_emilia_romagna_opendata, ispra:frane_piff_emilia_romagna_opendata,
+             ispra:aree_poly_emilia_romagna_opendata, ispra:dgpv_poly_emilia_romagna_opendata]
+
+# ---- place restricts the AREA, not the subject -----------------------------------
+- id: dtm-valle-aosta
+  tags: [place-not-subject, raster]
+  query: DTM della Valle d'Aosta
+  expect:
+    layers: [ispra:dtm]
+    forbid: [valle_d_aosta]
+    cql: null
+
+- id: dtm-en
+  tags: [raster, english]
+  query: show me the elevation model
+  expect:
+    layers: [ispra:dtm]
+
+- id: pai-molto-elevata-bari
+  tags: [place-not-subject, cql]
+  query: pericolosità da frana molto elevata a Bari
+  expect:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    forbid: ["^ispra:(frane|aree|dgpv)_"]
+    cql: "per_fr_ita = 'Molto elevata P4'"
+
+- id: geolitologica-sardegna
+  tags: [place-not-subject]
+  query: carta geolitologica della Sardegna
+  expect:
+    layers: [ispra:carta_geolitologica]
+    forbid: [sardegna]
+
+# ---- hazard (PAI) and attribute filters -------------------------------------------
+- id: pai-elevata
+  tags: [cql]
+  query: aree a pericolosità da frana elevata
+  expect:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    cql: "per_fr_ita = 'Elevata P3'"
+
+- id: pai-p3-p4
+  tags: [cql]
+  query: pericolosità frana elevata e molto elevata
+  expect:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    cql: "per_fr_ita IN ('Elevata P3', 'Molto elevata P4')"
+
+- id: pai-tutte
+  tags: [cql]
+  query: mostrami la mosaicatura PAI della pericolosità da frana
+  expect:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    cql: null
+
+- id: hazard-high-en
+  tags: [cql, english]
+  query: high landslide hazard areas
+  expect:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+
+- id: alta-pericolosita-umbria-layer-giusto
+  tags: [cql, wrong-layer-trap]
+  query: frane ad alta pericolosità in Umbria
+  expect:
+    # The hazard attribute lives only on the PAI layer, not on the inventory.
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    accept: [ispra:frane_poly_umbria_opendata]
+
+- id: crolli-campania
+  tags: [cql, region]
+  query: crolli e ribaltamenti in Campania
+  expect:
+    layers: [ispra:frane_poly_campania_opendata]
+    accept: [ispra:frane_line_campania_opendata, ispra:frane_piff_campania_opendata]
+    cql: "tipo_movim = '1'"
+
+- id: colamenti-rapidi-campania
+  tags: [cql, region]
+  query: colamenti rapidi in Campania
+  expect:
+    layers: [ispra:frane_poly_campania_opendata]
+    accept: [ispra:frane_line_campania_opendata, ispra:frane_piff_campania_opendata]
+    cql: "tipo_movim = '5'"
+
+- id: sprofondamenti-lazio
+  tags: [cql, region]
+  query: sprofondamenti nel Lazio
+  expect:
+    layers: [ispra:frane_poly_lazio_opendata]
+    accept: [ispra:frane_line_lazio_opendata, ispra:frane_piff_lazio_opendata]
+    cql: "tipo_movim = '6'"
+
+- id: piemonte-esclusi-crolli
+  tags: [cql, region, negation]
+  query: frane in Piemonte esclusi i crolli
+  expect:
+    layers: [ispra:frane_poly_piemonte_opendata]
+    accept: [ispra:frane_line_piemonte_opendata, ispra:frane_piff_piemonte_opendata]
+    cql: "tipo_movim <> '1'"
+
+# ---- reference / context layers ------------------------------------------------------
+- id: corine
+  tags: [reference]
+  query: uso del suolo Corine Land Cover
+  expect:
+    layers: [ispra:clc2018_it]
+
+- id: confini-comunali
+  tags: [reference, admin]
+  query: confini comunali
+  expect:
+    layers: [ispra:com01012023_g]
+
+- id: limiti-province
+  tags: [reference, admin]
+  query: limiti delle province e città metropolitane
+  expect:
+    layers: [ispra:provcm01012023_g]
+
+- id: confini-regionali
+  tags: [reference, admin]
+  query: mostra i confini regionali
+  expect:
+    layers: [ispra:reg01012023_g]
+
+- id: ripartizioni
+  tags: [reference, admin]
+  query: ripartizioni geografiche ISTAT
+  expect:
+    layers: [ispra:ripgeo01012023_g]
+
+# ---- combinations and negatives -------------------------------------------------------
+- id: frane-liguria-con-dtm
+  tags: [combination, raster]
+  query: frane poligonali in Liguria sopra il modello del terreno
+  expect:
+    layers: [ispra:frane_poly_liguria_opendata, ispra:dtm]
+
+- id: fuori-tema-meteo
+  tags: [negative]
+  query: previsioni meteo di domani a Roma
+  expect:
+    layers: []
+    cql: null

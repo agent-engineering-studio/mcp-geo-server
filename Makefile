@@ -144,6 +144,10 @@ test-cov: install ## Run tests with a coverage report (installs pytest-cov)
 	$(PIP) install -q pytest-cov
 	$(PYTEST) --cov=mcp_geo_server --cov-report=term-missing
 
+.PHONY: eval-resolver
+eval-resolver: install ## Score the NL->layer resolver on the golden set with the configured LLM (ARGS="--record r.json", "--replay r.json", "--only cql")
+	$(PY) -m mcp_geo_server.evals $(ARGS)
+
 .PHONY: test-integration
 test-integration: install ## Run live round-trip tests against a real GeoServer
 	GEO_RUN_INTEGRATION=1 $(PYTEST) -q tests/integration

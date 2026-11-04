@@ -175,6 +175,7 @@ services:
       WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
       WEBUI_RATE_LIMIT: ${WEBUI_RATE_LIMIT:-30}
       GEO_CATALOG_TTL: ${GEO_CATALOG_TTL:-60}
+      GEO_RESOLVER_STRUCTURED: ${GEO_RESOLVER_STRUCTURED:-true}
     ports:
       # Configurable host port so the UI can run beside another app on :8000 —
       # set WEBUI_HOST_PORT in .env (container always serves on 8000).
