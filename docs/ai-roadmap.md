@@ -46,7 +46,7 @@ aperti.
 
 | # | Problema | Evidenza | Azione |
 |---|---|---|---|
-| D1 | **Fase 0 del piano MCP non applicata**: `mcp>=1.0` ancora senza tetto | `pyproject.toml` | `mcp>=1.28,<2` subito |
+| D1 | **Fase 0 del piano MCP non applicata**: `mcp>=1.0` ancora senza tetto | `pyproject.toml` | `agent-framework>=1.24` + `mcp>=2.2,<3`: dalla 1.24 `as_mcp_server()` gira sull'SDK v2 |
 | D2 | Bind MCP di default su `0.0.0.0` | `config.py:152` | Default `127.0.0.1`, `0.0.0.0` esplicito in compose |
 | D3 | **Web UI senza autenticazione**: `/api/ask` (costo LLM), `/api/upload`, `POST /api/datastores` (credenziali DB nel body) sono aperti | `webui/app.py` | API key / OIDC davanti alla UI, rate limit su `/api/ask` |
 | D4 | Modello Anthropic di default datato | `config.py:143` `claude-sonnet-4-6` | Aggiornare il default a un modello corrente (es. `claude-sonnet-5-5`) |

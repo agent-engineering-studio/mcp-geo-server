@@ -194,7 +194,7 @@ async with streamablehttp_client("http://localhost:9000/mcp") as (r, w, _):
 
       <h3 style="margin:36px 0 14px">Phases</h3>
       <ol class="phases">
-        <li class="phase"><span class="num">0</span><div><h3>Close the blockers</h3><p>Pin <code>mcp&lt;2</code>, bind MCP to localhost by default, add auth and rate limiting to the web UI, update the default Claude model, cache the catalog.</p></div><span class="est">1–2 days</span></li>
+        <li class="phase"><span class="num">0</span><div><h3>Close the blockers</h3><p>Bound the <code>mcp</code> dependency, bind MCP to localhost by default, add auth and rate limiting to the web UI, update the default Claude model, cache the catalog.</p></div><span class="est">1–2 days</span></li>
         <li class="phase"><span class="num">1</span><div><h3>Measure, then constrain</h3><p>NL → layer evaluation, structured outputs, CQL guardrails.</p></div><span class="est">4–6 days</span></li>
         <li class="phase"><span class="num">2</span><div><h3>Extract the resolver, feed it metadata</h3><p>Move the resolution logic into the core package, make admin levels config-driven, generate AI metadata at ingest, add OTel.</p></div><span class="est">1 week</span></li>
         <li class="phase"><span class="num">3</span><div><h3>Scale the catalog</h3><p>pgvector retrieval, prompt caching, model router with fallback.</p></div><span class="est">1 week</span></li>
