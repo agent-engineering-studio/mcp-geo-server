@@ -86,6 +86,17 @@ def load_catalog(path: Path) -> list[LayerMeta]:
     return build_catalog(json.loads(path.read_text(encoding="utf-8")))
 
 
+async def live_catalog() -> list[dict]:
+    """Catalog entries from the configured GeoServer's WMS capabilities."""
+    from .catalog import parse_wms_capabilities
+    from .client import get_client
+
+    client = get_client()
+    resp = await client.ows({"service": "WMS", "version": "1.3.0",
+                             "request": "GetCapabilities"}, base=client.settings.wms_base)
+    return parse_wms_capabilities(resp.text)
+
+
 # ---- scoring ----------------------------------------------------------------------
 def cql_signature(text: str | None) -> dict[str, frozenset[str]] | None:
     """attribute -> values referenced, so `a IN ('x','y')` == `a='x' OR a='y'`."""
@@ -257,6 +268,11 @@ def main(argv: list[str] | None = None) -> int:
                                  description=__doc__.split("\n\n")[0])
     ap.add_argument("--cases", type=Path, default=EVAL_DIR / "cases.yaml")
     ap.add_argument("--catalog", type=Path, default=EVAL_DIR / "catalog_ispra.json")
+    ap.add_argument("--catalog-live", action="store_true",
+                    help="read the catalog from the configured GeoServer instead (e.g. "
+                         "to measure the effect of AI metadata)")
+    ap.add_argument("--save-catalog", type=Path,
+                    help="with --catalog-live: also save the snapshot to this file")
     ap.add_argument("--styles", type=Path, default=None,
                     help="styles.yml for the filterable attributes (default: packaged)")
     ap.add_argument("--replay", type=Path, help="score recorded replies, no LLM call")
@@ -274,7 +290,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.only:
         rx = re.compile(args.only)
         cases = [c for c in cases if rx.search(c.id) or any(rx.search(t) for t in c.tags)]
-    catalog = load_catalog(args.catalog)
+    if args.catalog_live:
+        entries = asyncio.run(live_catalog())
+        if args.save_catalog:
+            args.save_catalog.write_text(json.dumps(entries, ensure_ascii=False, indent=1),
+                                         encoding="utf-8")
+        catalog = build_catalog(entries)
+    else:
+        catalog = load_catalog(args.catalog)
     spec = filter_spec(load_config(str(args.styles)) if args.styles else load_config())
 
     meta: dict[str, Any] = {}

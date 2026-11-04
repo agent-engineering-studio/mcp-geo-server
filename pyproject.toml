@@ -23,6 +23,10 @@ dependencies = [
     "uvicorn>=0.29",
     "anyio>=4.0",
     "pyyaml>=6.0",
+    # Opt-in tracing/metrics (mcp_geo_server.telemetry); already pulled in by
+    # agent-framework, declared so the OTLP/HTTP exporter is guaranteed.
+    "opentelemetry-sdk>=1.39,<2",
+    "opentelemetry-exporter-otlp-proto-http>=1.39,<2",
 ]
 
 [project.optional-dependencies]

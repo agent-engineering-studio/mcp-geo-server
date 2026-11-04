@@ -144,6 +144,10 @@ test-cov: install ## Run tests with a coverage report (installs pytest-cov)
 	$(PIP) install -q pytest-cov
 	$(PYTEST) --cov=mcp_geo_server --cov-report=term-missing
 
+.PHONY: ai-metadata
+ai-metadata: install ## Let the LLM write title/abstract/keywords for published vector layers (ARGS="--dry-run -v", "--layer NAME", "--overwrite")
+	$(PY) -m mcp_geo_server.metadata $(ARGS)
+
 .PHONY: eval-resolver
 eval-resolver: install ## Score the NL->layer resolver on the golden set with the configured LLM (ARGS="--record r.json", "--replay r.json", "--only cql")
 	$(PY) -m mcp_geo_server.evals $(ARGS)

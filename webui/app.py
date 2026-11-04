@@ -23,6 +23,7 @@ from pydantic import BaseModel
 
 from mcp_geo_server.agent import _build_chat_client
 from mcp_geo_server import cql as _cql
+from mcp_geo_server import places as _places
 from mcp_geo_server import resolver as _resolver
 from mcp_geo_server.catalog import build_catalog, parse_wms_capabilities
 from mcp_geo_server.styling import load_config as _load_style_config
@@ -51,6 +52,10 @@ _STATIC = Path(__file__).resolve().parent / "static"
 # Target for UI shapefile uploads (own workspace/datastore, separate from the
 # curated `ispra` data).
 _UPLOAD_WS = (os.environ.get("GEO_UPLOAD_WORKSPACE") or "uploads").strip()
+# Let the LLM write title/abstract/keywords for an uploaded layer, so the chat
+# can find it by subject instead of by file name (mcp_geo_server.metadata).
+_UPLOAD_AI_METADATA = (os.environ.get("GEO_UPLOAD_AI_METADATA") or "false"
+                       ).strip().lower() in {"1", "true", "yes", "on"}
 _UPLOAD_DS = (os.environ.get("GEO_UPLOAD_DATASTORE") or "uploads_pg").strip()
 _UPLOAD_PG = PgConn(
     host=(os.environ.get("POSTGIS_HOST") or "postgis").strip(),
@@ -61,6 +66,9 @@ _UPLOAD_PG = PgConn(
     schema=(os.environ.get("POSTGIS_SCHEMA") or "public").strip(),
 )
 
+from mcp_geo_server import telemetry as _telemetry
+
+_telemetry.setup("mcp-geo-server-webui")
 app = FastAPI(title="mcp-geo-server test UI")
 # Starlette runs the LAST-added middleware first: auth, then the rate limit, so
 # anonymous traffic is rejected before it can consume someone's quota.
@@ -422,8 +430,17 @@ async def upload_shapefile(file: UploadFile = File(...),
         await _guard(publish(_UPLOAD_WS, _UPLOAD_DS, table, srs=srs, title=shp.stem))
         bbox = await featuretype_bbox(_UPLOAD_WS, table)
 
+    metadata = None
+    if _UPLOAD_AI_METADATA:
+        from mcp_geo_server import metadata as _metadata
+        try:
+            rep = await _metadata.enrich_layer(_UPLOAD_WS, table)
+            metadata = {k: rep.get(k) for k in ("status", "title", "keywords", "reason")}
+        except Exception as exc:  # noqa: BLE001 — metadata is best-effort
+            metadata = {"status": "failed", "reason": str(exc)}
     _invalidate_catalog()  # the new layer must be askable right away
-    return {"workspace": _UPLOAD_WS, "datastore": _UPLOAD_DS, "layer": table,
+    return {"metadata": metadata,
+            "workspace": _UPLOAD_WS, "datastore": _UPLOAD_DS, "layer": table,
             "qualified": f"{_UPLOAD_WS}:{table}", "bbox": bbox}
 
 
@@ -510,174 +527,26 @@ def _filter_spec() -> _resolver.FilterSpec:
 
 
 # ---- admin-area (comune / provincia / regione) spatial scoping -----------
-# When a chat request names an administrative unit, zoom to it and CLIP the
-# rendered layers to its exact boundary. ISTAT boundary layers, most specific
-# first (a comune match beats a regione match). Workspace defaults to the
-# catalog workspace; override with GEO_ADMIN_WORKSPACE.
-_ADMIN_WS = (os.environ.get("GEO_ADMIN_WORKSPACE") or "").strip()
-_ADMIN_LEVELS = [
-    {"level": "comune",    "layer": "com01012023_g",    "attr": "comune"},
-    {"level": "provincia", "layer": "provcm01012023_g", "attr": "den_uts"},
-    {"level": "regione",   "layer": "reg01012023_g",    "attr": "den_reg"},
-]
-_ADMIN_INDEX: list[tuple[str, dict, str]] | None = None
-_ADMIN_SCOPE_CACHE: dict[tuple[str, str], dict | None] = {}
+# Which boundary layers exist is domain config (`admin:` in styles.yml), read
+# by mcp_geo_server.places; the matching + geometry logic lives there too.
+_ADMIN_AREAS: _places.AdminAreas | None = None
 
 
-def _admin_ws() -> str:
-    return _ADMIN_WS or (get_client().settings.default_workspace or "")
+def _admin_areas() -> _places.AdminAreas:
+    global _ADMIN_AREAS
+    if _ADMIN_AREAS is None:
+        _ADMIN_AREAS = _places.AdminAreas(_places.admin_config(_load_style_config()))
+    return _ADMIN_AREAS
 
 
-def _demojibake(s: str) -> str:
-    """Repair classic double-encoded latin-1/UTF-8 text ('AgliÃ¨' -> 'Agliè').
-
-    Some boundary layers were loaded with the wrong encoding, so the DB holds
-    the mojibake. Used only for MATCHING against user text and for display — the
-    raw stored value is still used in the CQL filter that fetches the geometry.
-    """
-    try:
-        return s.encode("latin-1").decode("utf-8")
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        return s
+async def _detect_admin(query: str):
+    """The admin unit named in the query, if any: ``(AdminLevel, raw_name)``."""
+    return await _admin_areas().detect(query)
 
 
-def _norm_admin(s: str) -> str:
-    """Accent/case/punctuation-insensitive key for matching place names."""
-    import unicodedata
-    s = _demojibake(s)
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
-
-
-async def _admin_names(level: dict) -> list[str]:
-    """Raw stored names for one boundary layer (geometry excluded)."""
-    client = get_client()
-    try:
-        resp = await client.ows(
-            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
-             "typeNames": f"{_admin_ws()}:{level['layer']}",
-             "propertyName": level["attr"], "count": "20000",
-             "outputFormat": "application/json"},
-            base=client.settings.wfs_base)
-        import json as _json
-        data = _json.loads(resp.text)
-        return [f.get("properties", {}).get(level["attr"])
-                for f in data.get("features", [])
-                if f.get("properties", {}).get(level["attr"])]
-    except (GeoServerError, ValueError):
-        return []
-
-
-async def _admin_index() -> list[tuple[str, dict, str]]:
-    """Build ``(normalized_name, level, raw_name)`` once (cached process-wide)."""
-    global _ADMIN_INDEX
-    if _ADMIN_INDEX is None:
-        idx: list[tuple[str, dict, str]] = []
-        for level in _ADMIN_LEVELS:
-            for raw in await _admin_names(level):
-                n = _norm_admin(raw)
-                if len(n) >= 3:  # skip 2-letter names (false-positive prone)
-                    idx.append((n, level, raw))
-        _ADMIN_INDEX = idx
-    return _ADMIN_INDEX
-
-
-# Level keywords in the query force that admin level (e.g. 'provincia di Bari'
-# should scope to the province, not the comune that shares the name).
-_LEVEL_HINTS = {
-    "regione": "regione", "regionale": "regione",
-    "provincia": "provincia", "provincie": "provincia", "prov": "provincia",
-    "metropolitana": "provincia",  # 'città metropolitana di ...'
-    "comune": "comune",
-}
-
-
-def _level_hint(q_norm: str) -> str | None:
-    """The admin level explicitly named in the (normalized) query, if any."""
-    tokens = set(q_norm.split())
-    for kw, lvl in _LEVEL_HINTS.items():
-        if kw in tokens:
-            return lvl
-    return None
-
-
-async def _detect_admin(query: str) -> tuple[dict, str] | None:
-    """The admin unit named in the query, if any.
-
-    Matches whole normalized phrases (space-padded) so 'regione' won't spuriously
-    match a 2-letter comune. If the query names a level ('provincia di Bari'),
-    that level wins; otherwise the most specific (then longest) match wins.
-    """
-    q_norm = _norm_admin(query)
-    q = f" {q_norm} "
-    hint = _level_hint(q_norm)
-    order = {lvl["level"]: i for i, lvl in enumerate(_ADMIN_LEVELS)}
-    best: tuple[dict, str] | None = None
-    best_key = (99, 99, 0)
-    for n, level, raw in await _admin_index():
-        if f" {n} " in q:
-            lvl = level["level"]
-            # 0 if it matches the level the user named, else 1 (hint wins).
-            hint_rank = 0 if (hint and lvl == hint) else 1
-            # Then the LONGEST phrase match (a fuller name like "valle d aosta"
-            # beats the substring "aosta"), then the most specific level.
-            key = (hint_rank, -len(n), order[lvl])
-            if key < best_key:
-                best_key, best = key, (level, raw)
-    return best
-
-
-async def _admin_scope(level: dict, raw_name: str) -> dict | None:
+async def _admin_scope(level, raw_name: str) -> dict | None:
     """Zoom bbox + clip WKT (EPSG:4326) for one admin unit. Cached."""
-    ck = (level["layer"], raw_name)
-    if ck in _ADMIN_SCOPE_CACHE:
-        return _ADMIN_SCOPE_CACHE[ck]
-    client = get_client()
-    scope = None
-    try:
-        cql = f"{level['attr']}='{raw_name.replace(chr(39), chr(39) * 2)}'"
-        resp = await client.ows(
-            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
-             "typeNames": f"{_admin_ws()}:{level['layer']}", "cql_filter": cql,
-             "count": "1", "srsName": "EPSG:4326",
-             "outputFormat": "application/json"},
-            base=client.settings.wfs_base)
-        import json as _json
-        feats = _json.loads(resp.text).get("features", [])
-        geom_json = feats[0].get("geometry") if feats else None
-        if geom_json:
-            import shapely
-            from shapely.geometry import shape
-            geom = shape(geom_json)
-            minx, miny, maxx, maxy = geom.bounds
-
-            def _clip_wkt(g):
-                # Simplify to fit the WMS tile GET URL (Tomcat caps the request
-                # line at ~8 KB), then SNAP coordinates to a grid: raw simplified
-                # vertices carry FP noise (differing at the 15th decimal) that
-                # makes JTS throw "non-noded intersection" when GeoServer clips a
-                # vector layer. Snapping + make_valid removes those slivers.
-                g = shapely.set_precision(g, 1e-6)
-                if not g.is_valid:
-                    g = g.buffer(0)
-                return g.wkt
-
-            tol = 0.001
-            wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
-            while len(wkt) > 3500 and tol < 1:
-                tol *= 2
-                wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
-            scope = {
-                "level": level["level"],
-                "name": _demojibake(raw_name),
-                "bbox": {"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy},
-                "clip": f"SRID=4326;{wkt}",
-            }
-    except Exception:  # noqa: BLE001 — scoping is best-effort, never fail the ask
-        scope = None
-    _ADMIN_SCOPE_CACHE[ck] = scope
-    return scope
+    return await _admin_areas().scope(level, raw_name)
 
 
 # Terrain-metric intent: words that mean the user wants a DTM-derived metric
@@ -694,7 +563,7 @@ _METRIC_HINTS = {
 
 def _metric_intent(query: str) -> list[str]:
     """Terrain metrics named in the query (normalized, accent-insensitive)."""
-    toks = set(_norm_admin(query).split())
+    toks = set(_places.norm(query).split())
     return sorted({v for k, v in _METRIC_HINTS.items() if k in toks})
 
 
