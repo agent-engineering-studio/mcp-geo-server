@@ -58,7 +58,7 @@
       <h2>What it does</h2>
       <p class="sub">One async core — the GeoServer client, the <code>geo_*</code> tools and the shared ingest / catalog / styling modules — serves the MCP agent, the web UI and the data bootstrap.</p>
       <div class="grid">
-        <div class="card"><h3>Natural-language GeoServer agent</h3><p>A Microsoft Agent Framework agent with 33 <code>geo_*</code> tools, served over MCP (stdio or streamable HTTP).</p></div>
+        <div class="card"><h3>Typed MCP server</h3><p>38 tools over MCP 2026-07-28: the 33 <code>geo_*</code> GeoServer operations with annotations, high-level map tools such as <code>geo_resolve_request</code>, catalog resources and prompts.</p></div>
         <div class="card"><h3>Chat-first map UI</h3><p>Requests resolve to published layers, rendered on Leaflet with live WMS legend, admin-area clipping and per-layer CQL.</p></div>
         <div class="card"><h3>Domain-agnostic catalog</h3><p>Layer resolution reads names, titles, abstracts and keywords from WMS capabilities. There’s no vocabulary hardcoded in the code.</p></div>
         <div class="card"><h3>Idempotent data bootstrap</h3><p>Drop shapefiles and GeoTIFFs in <code>./data</code>: they land in PostGIS or as zero-copy coverages and are published automatically.</p></div>
@@ -90,7 +90,7 @@
           <!-- AI layer -->
           <rect class="box ai" x="220" y="30" width="170" height="54" rx="8"/>
           <text class="lbl" x="305" y="54" text-anchor="middle">MCP server :9000</text>
-          <text class="sm" x="305" y="72" text-anchor="middle">agent + DestructiveGuard</text>
+          <text class="sm" x="305" y="72" text-anchor="middle">38 typed tools + assistant</text>
           <rect class="box ai" x="220" y="180" width="170" height="54" rx="8"/>
           <text class="lbl" x="305" y="204" text-anchor="middle">Web UI :8000</text>
           <text class="sm" x="305" y="222" text-anchor="middle">NL resolver · WMS proxy</text>
@@ -146,16 +146,13 @@ make up               # start the stack</code></pre>
           </tbody>
         </table>
       </div>
-      <p class="sub" style="margin-top:28px">Call the agent from any MCP client:</p>
-<pre><code>from mcp.client.streamable_http import streamablehttp_client
-from mcp import ClientSession
+      <p class="sub" style="margin-top:28px">Call it from any MCP client:</p>
+<pre><code>import mcp
 
-async with streamablehttp_client("http://localhost:9000/mcp") as (r, w, _):
-    async with ClientSession(r, w) as s:
-        await s.initialize()
-        res = await s.call_tool("geoserver-agent",
-                                {"task": "How many features are in topp:states?"})
-        print(res.content[0].text)</code></pre>
+async with mcp.Client("http://localhost:9000/mcp") as client:
+    res = await client.call_tool("geo_resolve_request",
+                                 {"query": "frane ad alta pericolosità in Puglia"})
+    print(res.content[0].text)   # layers, cql_by_layer, bbox, clip, info…</code></pre>
     </div>
   </section>
 

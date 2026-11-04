@@ -211,10 +211,21 @@ zipped shapefile from the web UI at <http://localhost:8000/upload>.
 ## Use it from your AI assistant (MCP)
 
 The [Model Context Protocol](https://modelcontextprotocol.io) is an open standard
-that lets AI assistants use external tools. mcp-geo-server exposes **one smart
-tool**, `geoserver-agent`, that takes a plain-language `task`. Behind it, an agent
-built with the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework)
-chooses among **33 GeoServer operations**.
+that lets AI assistants use external tools. mcp-geo-server speaks protocol
+**2026-07-28** (mcp SDK v2) and exposes **38 typed tools**, so your
+assistant's own model picks the operation:
+
+| Tools | What for |
+|---|---|
+| `geo_resolve_request` | A map request in plain language → the chat's full answer: layers in draw order, per-layer CQL, zoom bbox, area clip, terrain metrics. Pass the previous answer as `context` to refine it. Uses the server's LLM. |
+| `geo_search_layers`, `geo_describe_layer` | Find layers by subject or place (no LLM), and get geometry, fields, count and bbox |
+| `geo_admin_scope` | The bbox and simplified boundary of a comune / provincia / regione |
+| 33 × `geo_*` | The raw GeoServer operations (REST, WMS, WFS, WFS-T, styles), each with its own schema and `readOnlyHint` / `destructiveHint` annotations |
+| `geoserver-agent` | The natural-language agent of earlier versions, built with the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). `GEO_MCP_AGENT_TOOL=false` hides it. |
+
+It also offers the resources `geo://catalog` and
+`geo://layer/{workspace}/{name}`, and the prompts `show-on-map` and
+`area-overview`. `GEO_MCP_MODE=agent` restores the old single-tool server.
 
 **Claude Desktop** (or any MCP client that runs a local process), in
 `claude_desktop_config.json`:
@@ -243,16 +254,17 @@ The `mcp-geo-server` command comes from `pip install -e .` (see
 port 9000):
 
 ```python
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
+import mcp
 
-async with streamablehttp_client("http://localhost:9000/mcp") as (r, w, _):
-    async with ClientSession(r, w) as s:
-        await s.initialize()
-        res = await s.call_tool("geoserver-agent",
-                                {"task": "List the workspaces and how many layers each has"})
-        print(res.content[0].text)
+async with mcp.Client("http://localhost:9000/mcp") as client:
+    res = await client.call_tool("geo_resolve_request",
+                                 {"query": "frane ad alta pericolosità in Puglia"})
+    print(res.content[0].text)          # layers, cql_by_layer, bbox, clip, info…
 ```
+
+In Docker the server binds `0.0.0.0` and checks the `Host` header against
+`GEO_MCP_ALLOWED_HOSTS` (default `localhost:*,127.0.0.1:*,mcp:*`) to block DNS
+rebinding. Add the host name your clients actually use.
 
 > 🔒 **Safe by default.** Destructive operations (deleting layers, stores and
 > styles, and WFS-T edits) are blocked by a guard in front of the tools unless
@@ -654,6 +666,9 @@ Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
 | `OPENAI_LLM_MODEL` | _(none)_ | Required under `openai`; a routing key behind a gateway |
 | `OPENAI_API_KEY` | _(none)_ | Required for OpenAI; optional for a keyless gateway |
 | `GEO_MCP_TRANSPORT` / `GEO_MCP_HOST` / `GEO_MCP_PORT` | `stdio` / `127.0.0.1` / `9000` | MCP transport + bind (Compose sets `0.0.0.0` inside the container) |
+| `GEO_MCP_MODE` | `tools` | `tools`: typed tools + map assistant + resources/prompts; `agent`: the old single `geoserver-agent` tool |
+| `GEO_MCP_AGENT_TOOL` | `true` | In `tools` mode, also expose `geoserver-agent` |
+| `GEO_MCP_ALLOWED_HOSTS` / `GEO_MCP_ALLOWED_ORIGINS` | _(none; Compose: `localhost:*,127.0.0.1:*,mcp:*`)_ | DNS-rebinding protection on an open bind (on loopback the SDK enables it by itself) |
 | `GEO_ALLOW_DESTRUCTIVE` | `false` | Allow destructive tools (`geo_delete_*`, `geo_wfs_transaction`) |
 | `GEO_LOG_LEVEL` | `INFO` | Log level of the `mcp_geo_server` logger |
 

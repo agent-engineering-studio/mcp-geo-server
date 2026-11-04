@@ -107,30 +107,29 @@ def test_rate_limit_env_default(monkeypatch):
 
 # ---- catalog cache --------------------------------------------------------
 async def test_catalog_is_cached_and_invalidated(monkeypatch):
-    from webui import app as webui_app
+    from mcp_geo_server.answer import MapAssistant
 
+    assistant = MapAssistant()
     calls = []
 
     async def fake_fetch():
         calls.append(1)
         return [f"catalog-{len(calls)}"]
 
-    monkeypatch.setattr(webui_app, "_fetch_catalog", fake_fetch)
-    monkeypatch.setattr(webui_app, "_CATALOG_TTL", 60.0)
-    webui_app._invalidate_catalog()
+    monkeypatch.setattr(assistant, "fetch_catalog", fake_fetch)
+    assistant.catalog_ttl = 60.0
 
-    assert await webui_app._load_catalog() == ["catalog-1"]
-    assert await webui_app._load_catalog() == ["catalog-1"]
+    assert await assistant.load_catalog() == ["catalog-1"]
+    assert await assistant.load_catalog() == ["catalog-1"]
     assert len(calls) == 1
 
-    webui_app._invalidate_catalog()
-    assert await webui_app._load_catalog() == ["catalog-2"]
+    assistant.invalidate_catalog()
+    assert await assistant.load_catalog() == ["catalog-2"]
 
-    monkeypatch.setattr(webui_app, "_CATALOG_TTL", 0.0)   # 0 = no cache
-    await webui_app._load_catalog()
-    await webui_app._load_catalog()
+    assistant.catalog_ttl = 0.0                       # 0 = no cache
+    await assistant.load_catalog()
+    await assistant.load_catalog()
     assert len(calls) == 4
-    webui_app._invalidate_catalog()
 
 
 async def test_app_healthz_and_auth_wired(monkeypatch):

@@ -17,7 +17,7 @@ Documento redatto il 2026-11-04. Stato del codice analizzato: commit `effbdba`.
 | 2 — `places.py`, metadata AI, OpenTelemetry | review: #12 → in `main` con questa PR | #12, #16 |
 | 3 — retrieval per famiglie, router di modelli, prompt caching | review: #14 → in `main` con questa PR | #14, #16 |
 | 4 — chat a più turni, intent dal modello, stili da testo | review: #15 → in `main` con questa PR | #15, #16 |
-| 5 — tool MCP di alto livello | da fare | — |
+| 5 — tool MCP di alto livello, server MCP v2 tipizzato | in review | #17 |
 | 6 — analitica, report, QA visivo | da fare | — |
 
 Nota: nessuna fase ha ancora una baseline misurata su un LLM reale; il primo
