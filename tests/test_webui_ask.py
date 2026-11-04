@@ -111,3 +111,78 @@ async def test_unparseable_reply_is_502(ask, monkeypatch):
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             return await c.post("/api/ask", json={"query": "q"})
     assert (await call()).status_code == 502
+
+
+# ---- follow-up turns ------------------------------------------------------------------
+@pytest.fixture
+def ask_with_areas(ask, monkeypatch):
+    """`ask`, plus a fake admin matcher that knows 'Puglia' and 'Bari'."""
+    from mcp_geo_server import places
+    from mcp_geo_server.styling import load_config
+    from webui import app as webui_app
+
+    levels = {lvl.level: lvl for lvl in places.admin_config(load_config()).levels}
+    seen = []
+
+    async def detect(text):
+        seen.append(text)
+        t = text.lower()
+        if "puglia" in t:
+            return (levels["regione"], "Puglia")
+        if "bari" in t:
+            return (levels["provincia"], "Bari")
+        return None
+
+    async def scope(level, raw):
+        return {"level": level.level, "name": raw, "clip": "SRID=4326;POINT(1 1)",
+                "bbox": {"minx": 0, "miny": 0, "maxx": 1, "maxy": 1}}
+
+    monkeypatch.setattr(webui_app, "_detect_admin", detect)
+    monkeypatch.setattr(webui_app, "_admin_scope", scope)
+    return ask, seen
+
+
+async def _post(monkeypatch, reply, query, context):
+    from webui import app as webui_app
+    monkeypatch.setattr(webui_app, "_RESOLVER_TIERS", [Tier(FakeAgent(reply), "ollama")])
+    transport = httpx.ASGITransport(app=webui_app.app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
+        return (await c.post("/api/ask", json={"query": query, "context": context})).json()
+
+
+async def test_refine_keeps_the_previous_area(ask_with_areas, monkeypatch):
+    _, seen = ask_with_areas
+    ctx = {"layers": [PAI], "cql_filter": None,
+           "admin": {"level": "regione", "name": "Puglia", "raw": "Puglia"}}
+    body = await _post(monkeypatch, {"layers": [PAI], "cql_filter": "per_fr_ita = 'Molto elevata P4'",
+                                     "explanation": "", "confidence": 0.9, "mode": "refine",
+                                     "metrics": [], "place": None},
+                       "solo molto elevata", ctx)
+    assert body["mode"] == "refine"
+    assert body["admin"] == {"level": "regione", "name": "Puglia", "raw": "Puglia"}
+    assert "INTERSECTS" in body["cql_by_layer"][PAI]
+
+
+async def test_new_subject_drops_the_previous_area(ask_with_areas, monkeypatch):
+    ctx = {"layers": [PAI], "admin": {"level": "regione", "name": "Puglia", "raw": "Puglia"}}
+    body = await _post(monkeypatch, {"layers": [FRANE], "cql_filter": None, "explanation": "",
+                                     "confidence": 0.9, "mode": "new", "metrics": [],
+                                     "place": None}, "frane del Molise", ctx)
+    assert body["mode"] == "new" and "admin" not in body
+
+
+async def test_refine_without_context_is_new(ask_with_areas, monkeypatch):
+    body = await _post(monkeypatch, {"layers": [PAI], "cql_filter": None, "explanation": "",
+                                     "confidence": 0.9, "mode": "refine", "metrics": [],
+                                     "place": None}, "solo quelle", None)
+    assert body["mode"] == "new"
+
+
+async def test_model_place_is_a_fallback_for_the_area(ask_with_areas, monkeypatch):
+    _, seen = ask_with_areas
+    body = await _post(monkeypatch, {"layers": [PAI], "cql_filter": None, "explanation": "",
+                                     "confidence": 0.9, "mode": "new", "metrics": [],
+                                     "place": "provincia di Bari"},
+                       "pericolosità nel barese", None)
+    assert seen == ["pericolosità nel barese", "provincia di Bari"]
+    assert body["admin"]["name"] == "Bari"

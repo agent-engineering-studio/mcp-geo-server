@@ -69,6 +69,8 @@ class Case:
     forbid: list[str] = field(default_factory=list)
     cql: Any = UNCHECKED          # absent = not scored; None = must be null
     tags: list[str] = field(default_factory=list)
+    context: dict | None = None   # map state of a previous turn (follow-ups)
+    mode: str | None = None       # expected "new" / "refine"; None = not scored
 
 
 def load_cases(path: Path) -> list[Case]:
@@ -80,7 +82,8 @@ def load_cases(path: Path) -> list[Case]:
             id=c["id"], query=c["query"], layers=list(exp.get("layers", [])),
             accept=list(exp.get("accept", [])), forbid=list(exp.get("forbid", [])),
             cql=exp["cql"] if "cql" in exp else UNCHECKED,
-            tags=list(c.get("tags", []))))
+            tags=list(c.get("tags", [])),
+            context=c.get("context"), mode=exp.get("mode")))
     ids = [c.id for c in cases]
     dupes = {i for i in ids if ids.count(i) > 1}
     if dupes:
@@ -148,12 +151,13 @@ class Score:
     candidates: int | None = None     # layers shown to the model
     model: str | None = None          # tier that answered
     escalated: bool = False
+    mode_ok: bool | None = None       # None = not scored
     retrieval_miss: list[str] = field(default_factory=list)  # expected, not shown
 
     @property
     def passed(self) -> bool:
         return (self.error is None and self.exact and not self.forbidden
-                and self.cql_ok is not False)
+                and self.cql_ok is not False and self.mode_ok is not False)
 
 
 def score_case(case: Case, selection: dict | None, *, error: str | None = None,
@@ -173,10 +177,12 @@ def score_case(case: Case, selection: dict | None, *, error: str | None = None,
     if case.cql is not UNCHECKED:
         cql_ok = cql_signature(selection.get("cql_filter")) == cql_signature(case.cql)
     rejected = selection.get("cql_rejected") or {}
+    mode_ok = None if case.mode is None else selection.get("mode") == case.mode
     return Score(case.id, precision, recall, exact, forbidden, cql_ok, error,
                  selection.get("structured"), latency_s, got,
                  selection.get("cql_filter"),
-                 f"{rejected.get('filter')!r}: {rejected.get('reason')}" if rejected else None)
+                 f"{rejected.get('filter')!r}: {rejected.get('reason')}" if rejected else None,
+                 mode_ok=mode_ok)
 
 
 def summarize(scores: list[Score]) -> dict:
@@ -236,7 +242,8 @@ async def run_cases(cases: list[Case], catalog: list[LayerMeta], spec: FilterSpe
         try:
             sel = await resolve_routed(tiers, case.query, catalog, spec,
                                        min_confidence=min_confidence,
-                                       structured=structured, retriever=retriever)
+                                       structured=structured, retriever=retriever,
+                                       context=case.context)
             raw[case.query] = sel.get("raw", "")
             sc = score_case(case, sel, latency_s=time.perf_counter() - t0)
             sc.candidates = sel.get("candidates")
@@ -269,6 +276,8 @@ def _print_report(scores: list[Score], summary: dict, out=sys.stdout) -> None:
             extra.append(f"cql_rejected={s.cql_rejected}")
         if s.retrieval_miss:
             extra.append(f"retrieval_miss={s.retrieval_miss}")
+        if s.mode_ok is False:
+            extra.append("mode=wrong")
         print(f"{mark}  {s.id:<34} P={s.precision:.2f} R={s.recall:.2f} "
               + " ".join(extra), file=out)
     print("\n" + json.dumps(summary, indent=2), file=out)

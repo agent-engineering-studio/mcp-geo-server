@@ -230,3 +230,59 @@
   expect:
     layers: []
     cql: null
+
+# ---- follow-up turns (context = the map of the previous answer) ----------------------
+- id: segue-solo-crolli
+  tags: [multi-turn, cql]
+  query: solo i crolli
+  context:
+    layers: [ispra:frane_poly_campania_opendata]
+    cql_filter: null
+  expect:
+    layers: [ispra:frane_poly_campania_opendata]
+    cql: "tipo_movim = '1'"
+    mode: refine
+
+- id: segue-solo-molto-elevata
+  tags: [multi-turn, cql]
+  query: solo le aree a pericolosità molto elevata
+  context:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    cql_filter: null
+    admin: {level: regione, name: Puglia, raw: Puglia}
+  expect:
+    layers: [ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai]
+    cql: "per_fr_ita = 'Molto elevata P4'"
+    mode: refine
+
+- id: segue-aggiungi-dtm
+  tags: [multi-turn, raster]
+  query: aggiungi il modello digitale del terreno
+  context:
+    layers: [ispra:frane_poly_liguria_opendata]
+    cql_filter: null
+  expect:
+    layers: [ispra:frane_poly_liguria_opendata, ispra:dtm]
+    mode: refine
+
+- id: segue-togli-dtm-tieni-filtro
+  tags: [multi-turn, cql]
+  query: togli il DTM
+  context:
+    layers: [ispra:dtm, ispra:frane_poly_campania_opendata]
+    cql_filter: "tipo_movim = '1'"
+  expect:
+    layers: [ispra:frane_poly_campania_opendata]
+    cql: "tipo_movim = '1'"
+    mode: refine
+
+- id: segue-nuovo-argomento
+  tags: [multi-turn]
+  query: ora mostrami la carta geolitologica
+  context:
+    layers: [ispra:frane_poly_toscana_opendata]
+    cql_filter: null
+  expect:
+    layers: [ispra:carta_geolitologica]
+    forbid: [toscana]
+    mode: new

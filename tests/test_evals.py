@@ -110,6 +110,7 @@ def _perfect_replies() -> dict:
     for c in CASES:
         replies[c.query] = json.dumps({
             "layers": c.layers, "explanation": "ok", "confidence": 0.9,
+            "mode": c.mode or "new", "metrics": [], "place": None,
             "cql_filter": c.cql if isinstance(c.cql, str) else None})
     return replies
 
