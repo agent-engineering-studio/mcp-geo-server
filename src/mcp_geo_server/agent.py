@@ -139,14 +139,26 @@ def model_name(settings: Settings) -> str:
     return getattr(settings, _MODEL_FIELD.get(settings.llm_provider, "ollama_model"))
 
 
-def build_agent() -> Agent:
-    """Build the GeoServer agent backed by the configured LLM provider."""
+def build_agent(remote=None) -> Agent:
+    """Build the GeoServer agent backed by the configured LLM provider.
+
+    ``remote`` (:class:`mcp_geo_server.remote_mcp.RemoteTools`) adds the tools
+    of the reachable remote MCP servers (``GEO_EXTRA_MCP_SERVERS``); without it
+    the agent has the local ``geo_*`` tools only.
+    """
+    from .remote_mcp import instructions_for
+
     settings = get_settings()
     client = _build_chat_client(settings)
+    tools: list = list(collect_tools())
+    instructions = INSTRUCTIONS
+    if remote is not None and remote.tools:
+        tools += remote.tools
+        instructions += instructions_for(remote)
     return client.as_agent(
         name=AGENT_NAME,
         description=AGENT_DESCRIPTION,
-        instructions=INSTRUCTIONS,
-        tools=collect_tools(),
+        instructions=instructions,
+        tools=tools,
         middleware=[DestructiveGuard()],
     )

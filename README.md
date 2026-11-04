@@ -223,6 +223,26 @@ assistant's own model picks the operation:
 | 33 × `geo_*` | The raw GeoServer operations (REST, WMS, WFS, WFS-T, styles), each with its own schema and `readOnlyHint` / `destructiveHint` annotations |
 | `geoserver-agent` | The natural-language agent of earlier versions, built with the [Microsoft Agent Framework](https://github.com/microsoft/agent-framework). `GEO_MCP_AGENT_TOOL=false` hides it. |
 
+**Remote MCP servers as extra tools.** The agent behind `geoserver-agent` can
+also use the tools of other streamable-HTTP MCP servers. For example,
+[`idrogeo-mcp`](https://github.com/agent-engineering-studio/ispra-idrogeo)
+adds landslide inventory, exposed population and monitoring sites, so it can
+answer questions like *"quante persone vivono in aree a frana elevata a Sarno,
+e chi monitora quelle frane?"*.
+
+```bash
+GEO_EXTRA_MCP_SERVERS=idrogeo=http://idrogeo-mcp:8767/mcp   # name=url, comma-separated
+GEO_EXTRA_MCP_INSTRUCTIONS="Use the idrogeo_* tools for landslides, exposed population and monitoring."
+```
+
+- **Tool names.** Each server's tools are prefixed with its name
+  (`idrogeo_area_risk`, …), so they can't clash with the local ones.
+- **Unreachable servers.** At startup each server is probed with a hard
+  deadline (`GEO_EXTRA_MCP_TIMEOUT`, default 10 s). One that doesn't answer is
+  logged and left out, and the agent starts with the local tools. If a
+  server goes down later, the next call rebuilds the agent and probes again.
+- **Empty variable.** Nothing changes from before.
+
 It also offers the resources `geo://catalog` and
 `geo://layer/{workspace}/{name}`, and the prompts `show-on-map` and
 `area-overview`. `GEO_MCP_MODE=agent` restores the old single-tool server.
@@ -698,6 +718,8 @@ Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
 | `GEO_MCP_MODE` | `tools` | `tools`: typed tools + map assistant + resources/prompts; `agent`: the old single `geoserver-agent` tool |
 | `GEO_MCP_AGENT_TOOL` | `true` | In `tools` mode, also expose `geoserver-agent` |
 | `GEO_MCP_ALLOWED_HOSTS` / `GEO_MCP_ALLOWED_ORIGINS` | _(none; Compose: `localhost:*,127.0.0.1:*,mcp:*`)_ | DNS-rebinding protection on an open bind (on loopback the SDK enables it by itself) |
+| `GEO_EXTRA_MCP_SERVERS` | _(none)_ | Remote streamable-HTTP MCP servers for the agent, as comma-separated `name=url` (tools prefixed `name_`) |
+| `GEO_EXTRA_MCP_TIMEOUT` / `GEO_EXTRA_MCP_INSTRUCTIONS` | `10` / _(none)_ | Probe deadline in seconds / extra agent instructions on when to use them |
 | `GEO_ALLOW_DESTRUCTIVE` | `false` | Allow destructive tools (`geo_delete_*`, `geo_wfs_transaction`) |
 | `GEO_LOG_LEVEL` | `INFO` | Log level of the `mcp_geo_server` logger |
 
