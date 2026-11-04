@@ -47,6 +47,8 @@ from mcp_geo_server.tools.ogc import qualified_name, wfs_getfeature_params
 from mcp_geo_server.tools.styles import SLD_CONTENT_TYPE, styles_path
 from mcp_geo_server.tools.map import render_map, _bounds_from_bbox
 
+from webui.security import BasicAuthMiddleware, RateLimitMiddleware
+
 _STATIC = Path(__file__).resolve().parent / "static"
 
 # Target for UI shapefile uploads (own workspace/datastore, separate from the
@@ -63,6 +65,10 @@ _UPLOAD_PG = PgConn(
 )
 
 app = FastAPI(title="mcp-geo-server test UI")
+# Starlette runs the LAST-added middleware first: auth, then the rate limit, so
+# anonymous traffic is rejected before it can consume someone's quota.
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(BasicAuthMiddleware)
 
 # Lazily-built LLM resolver (no GeoServer tools — it only maps NL -> layer names).
 _RESOLVER = None
@@ -443,23 +449,49 @@ async def upload_shapefile(file: UploadFile = File(...),
         await _guard(publish(_UPLOAD_WS, _UPLOAD_DS, table, srs=srs, title=shp.stem))
         bbox = await featuretype_bbox(_UPLOAD_WS, table)
 
+    _invalidate_catalog()  # the new layer must be askable right away
     return {"workspace": _UPLOAD_WS, "datastore": _UPLOAD_DS, "layer": table,
             "qualified": f"{_UPLOAD_WS}:{table}", "bbox": bbox}
 
 
 # ---- layer catalog + natural-language command -----------------------------
-async def _load_catalog() -> list:
-    """Build the catalog from the WMS capabilities (name + title + keywords).
+# The catalog only changes when layers are published, so a full WMS
+# GetCapabilities per chat request is wasted work. Cache it for
+# GEO_CATALOG_TTL seconds (default 60, 0 = no cache); uploads invalidate it.
+_CATALOG_TTL = float(os.environ.get("GEO_CATALOG_TTL") or 60)
+_CATALOG_CACHE: tuple[float, list] | None = None
+_CATALOG_LOCK = asyncio.Lock()
 
-    Domain-agnostic: one GetCapabilities call gives every published layer's real
-    metadata, so the resolver matches requests semantically without any
-    hardcoded vocabulary.
-    """
+
+def _invalidate_catalog() -> None:
+    global _CATALOG_CACHE
+    _CATALOG_CACHE = None
+
+
+async def _fetch_catalog() -> list:
     client = get_client()
     resp = await _guard(client.ows(
         {"service": "WMS", "version": "1.3.0", "request": "GetCapabilities"},
         base=client.settings.wms_base))
     return build_catalog(parse_wms_capabilities(resp.text))
+
+
+async def _load_catalog() -> list:
+    """Build the catalog from the WMS capabilities (name + title + keywords).
+
+    Domain-agnostic: one GetCapabilities call gives every published layer's real
+    metadata, so the resolver matches requests semantically without any
+    hardcoded vocabulary. Cached for ``GEO_CATALOG_TTL`` seconds; concurrent
+    misses share a single fetch.
+    """
+    global _CATALOG_CACHE
+    if _CATALOG_TTL <= 0:
+        return await _fetch_catalog()
+    async with _CATALOG_LOCK:
+        now = asyncio.get_running_loop().time()
+        if _CATALOG_CACHE is None or now - _CATALOG_CACHE[0] >= _CATALOG_TTL:
+            _CATALOG_CACHE = (now, await _fetch_catalog())
+        return _CATALOG_CACHE[1]
 
 
 @app.get("/api/layers")
@@ -918,6 +950,12 @@ async def enrich_endpoint(body: EnrichIn) -> dict:
     except Exception as exc:  # noqa: BLE001 — surface enrichment errors
         raise HTTPException(status_code=400,
                             detail=f"enrichment failed: {exc}") from exc
+
+
+@app.get("/healthz")
+async def healthz() -> dict:
+    """Liveness probe: no GeoServer/LLM call, and exempt from Basic auth."""
+    return {"ok": True}
 
 
 @app.get("/")

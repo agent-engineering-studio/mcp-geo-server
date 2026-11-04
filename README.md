@@ -520,15 +520,18 @@ Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
 | `GEOSERVER_VERIFY_TLS` | `true` | Verify TLS certificates |
 | `GEO_MAP_OUTPUT_DIR` | `./maps` | Where generated maps / downloaded PNGs are saved |
 | `WEBUI_PORT` | `8000` | Port for the web UI |
+| `WEBUI_USER` / `WEBUI_PASSWORD` | _(none)_ | When **both** are set, every web UI route except `/healthz` requires HTTP Basic auth |
+| `WEBUI_RATE_LIMIT` | `30` | Requests per minute per client IP on `/api/ask`, `/api/enrich`, `/api/upload` (`0` = off) |
+| `GEO_CATALOG_TTL` | `60` | Seconds the chat caches the WMS layer catalog (`0` = no cache); an upload refreshes it |
 | `GEO_LLM_PROVIDER` | `ollama` | `ollama`, `ollama-cloud`, `anthropic` or `openai` |
 | `OLLAMA_HOST` | `http://localhost:11434` | Ollama endpoint (containers use `host.docker.internal`) |
 | `OLLAMA_LLM_MODEL` | `qwen2.5` | Ollama model (tool-calling capable / cloud model id) |
 | `OLLAMA_CLOUD_HOST` / `OLLAMA_API_KEY` | `https://ollama.com` / _(none)_ | Ollama Cloud endpoint / key |
-| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | _(none)_ / `claude-sonnet-4-6` | Anthropic key / model |
+| `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` | _(none)_ / `claude-sonnet-5-5` | Anthropic key / model |
 | `OPENAI_BASE_URL` | _(none → api.openai.com)_ | OpenAI-compatible endpoint, **including** the `/v1` suffix |
 | `OPENAI_LLM_MODEL` | _(none)_ | Required under `openai`; a routing key behind a gateway |
 | `OPENAI_API_KEY` | _(none)_ | Required for OpenAI; optional for a keyless gateway |
-| `GEO_MCP_TRANSPORT` / `GEO_MCP_HOST` / `GEO_MCP_PORT` | `stdio` / `0.0.0.0` / `9000` | MCP transport + bind |
+| `GEO_MCP_TRANSPORT` / `GEO_MCP_HOST` / `GEO_MCP_PORT` | `stdio` / `127.0.0.1` / `9000` | MCP transport + bind (Compose sets `0.0.0.0` inside the container) |
 | `GEO_ALLOW_DESTRUCTIVE` | `false` | Allow destructive tools (`geo_delete_*`, `geo_wfs_transaction`) |
 | `GEO_LOG_LEVEL` | `INFO` | Log level of the `mcp_geo_server` logger |
 

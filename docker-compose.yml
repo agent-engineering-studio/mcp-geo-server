@@ -163,12 +163,18 @@ services:
       OLLAMA_CLOUD_HOST: ${OLLAMA_CLOUD_HOST:-https://ollama.com}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       # Terrain enrichment reads the DTM raster FILE directly (not WMS). The DTM
       # is referenced by its COVERAGE LAYER name and the file path is resolved
       # from GeoServer at runtime (works for ANY published DTM). GEO_DTM_PATH is
       # only an optional explicit override / fallback when no layer is given.
       GEO_DTM_PATH: ${GEO_DTM_PATH:-}
+      # Optional access control (see webui/security.py): Basic auth on every
+      # route when BOTH are set; per-IP requests/minute on the LLM routes.
+      WEBUI_USER: ${WEBUI_USER:-}
+      WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
+      WEBUI_RATE_LIMIT: ${WEBUI_RATE_LIMIT:-30}
+      GEO_CATALOG_TTL: ${GEO_CATALOG_TTL:-60}
     ports:
       # Configurable host port so the UI can run beside another app on :8000 —
       # set WEBUI_HOST_PORT in .env (container always serves on 8000).
@@ -205,8 +211,10 @@ services:
       OLLAMA_CLOUD_HOST: ${OLLAMA_CLOUD_HOST:-https://ollama.com}
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-4-6}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
       GEO_MCP_TRANSPORT: http
+      # Open bind inside the container (the app default is 127.0.0.1); the
+      # port mapping below decides what the host exposes.
       GEO_MCP_HOST: 0.0.0.0
       GEO_MCP_PORT: "9000"
       GEO_ALLOW_DESTRUCTIVE: ${GEO_ALLOW_DESTRUCTIVE:-false}
