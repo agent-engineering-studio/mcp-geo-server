@@ -279,8 +279,15 @@ async def geoserver_agent(task: str) -> str:
     global _AGENT
     if _AGENT is None:
         from .agent import build_agent
-        _AGENT = build_agent()
-    result = await _AGENT.run(task)
+        from .remote_mcp import reachable_tools
+        _AGENT = build_agent(await reachable_tools())
+    try:
+        result = await _AGENT.run(task)
+    except Exception:
+        # e.g. a remote MCP server went away mid-life: rebuild (and re-probe)
+        # on the next call instead of failing forever.
+        _AGENT = None
+        raise
     return result.text
 
 
@@ -363,9 +370,13 @@ def build_tools_server():
 def build_agent_server():
     """The ``agent``-mode low-level Server: one tool backed by the server's agent."""
     from .agent import build_agent
+    from .remote_mcp import reachable_tools_sync, servers_from_env
 
-    return build_agent().as_mcp_server(server_name=MCP_SERVER_NAME, version=__version__,
-                                       instructions=AGENT_INSTRUCTIONS)
+    # No event loop runs yet here (the transport starts it), so probe the
+    # remote servers synchronously; only reachable ones are mounted.
+    remote = reachable_tools_sync() if servers_from_env() else None
+    return build_agent(remote).as_mcp_server(server_name=MCP_SERVER_NAME, version=__version__,
+                                             instructions=AGENT_INSTRUCTIONS)
 
 
 def mcp_mode() -> str:

@@ -258,6 +258,12 @@ services:
       # Add the name your MCP clients use (e.g. a reverse-proxy host).
       GEO_MCP_ALLOWED_HOSTS: ${GEO_MCP_ALLOWED_HOSTS:-localhost:*,127.0.0.1:*,mcp:*}
       GEO_MCP_ALLOWED_ORIGINS: ${GEO_MCP_ALLOWED_ORIGINS:-}
+      # Remote MCP servers whose tools the geoserver-agent may use, as
+      # name=url pairs (e.g. idrogeo=http://idrogeo-mcp:8767/mcp). Unreachable
+      # ones are logged and skipped; empty = local tools only.
+      GEO_EXTRA_MCP_SERVERS: ${GEO_EXTRA_MCP_SERVERS:-}
+      GEO_EXTRA_MCP_TIMEOUT: ${GEO_EXTRA_MCP_TIMEOUT:-10}
+      GEO_EXTRA_MCP_INSTRUCTIONS: ${GEO_EXTRA_MCP_INSTRUCTIONS:-}
       # geo_resolve_request uses the same domain config as the chat.
       GEO_STYLES_CONFIG: ${GEO_STYLES_CONFIG:-/data/styles.yml}
       GEO_ALLOW_DESTRUCTIVE: ${GEO_ALLOW_DESTRUCTIVE:-false}
