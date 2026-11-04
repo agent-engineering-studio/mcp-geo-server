@@ -89,17 +89,37 @@ def parse_wms_capabilities(xml_text: str) -> list[dict]:
     return layers
 
 
+# Keywords that say nothing about the subject: GeoServer's default, and the
+# provenance tag of AI-written metadata (mcp_geo_server.metadata).
+_NOISE_KEYWORDS = {"features", "metadata:ai"}
+# The abstract is the richest signal but also the longest: keep the first part.
+ABSTRACT_CHARS = 160
+
+
+def _is_noise(keyword: str, m: LayerMeta) -> bool:
+    k = keyword.strip().lower()
+    return k in _NOISE_KEYWORDS or k == m.name.lower()
+
+
 def catalog_prompt(catalog: list[LayerMeta]) -> str:
     """Render the catalog as a compact table for the LLM resolver.
 
-    Each line gives the EXACT qualified name plus its human title and keywords,
-    so the model can match a natural-language request semantically.
+    Each line gives the EXACT qualified name plus its human title, keywords and
+    the start of its abstract, so the model can match a natural-language
+    request semantically. Keywords that only repeat the name are dropped.
     """
     lines = []
     for m in catalog:
-        extra = m.title if m.title and m.title != m.name else ""
-        if m.keywords:
-            extra = (extra + " | " if extra else "") + "kw: " + ", ".join(m.keywords)
+        parts = []
+        if m.title and m.title != m.name:
+            parts.append(m.title)
+        kws = [k for k in m.keywords if not _is_noise(k, m)]
+        if kws:
+            parts.append("kw: " + ", ".join(kws))
+        if m.abstract:
+            a = " ".join(m.abstract.split())
+            parts.append(a[:ABSTRACT_CHARS] + ("…" if len(a) > ABSTRACT_CHARS else ""))
+        extra = " | ".join(parts)
         lines.append(f"{m.qualified}" + (f"\t{extra}" if extra else ""))
     return ("Available layers (use the EXACT qualified name on the left):\n"
             + "\n".join(lines))

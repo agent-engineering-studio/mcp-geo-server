@@ -21,13 +21,11 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from mcp_geo_server.agent import _build_chat_client
-from mcp_geo_server.catalog import (
-    build_catalog,
-    catalog_prompt,
-    parse_wms_capabilities,
-    validate_selection,
-)
+from mcp_geo_server import cql as _cql
+from mcp_geo_server import places as _places
+from mcp_geo_server import resolver as _resolver
+from mcp_geo_server import retrieval as _retrieval
+from mcp_geo_server.catalog import build_catalog, parse_wms_capabilities
 from mcp_geo_server.styling import load_config as _load_style_config
 from mcp_geo_server.client import GeoServerError, get_client
 from mcp_geo_server.config import get_settings
@@ -54,6 +52,10 @@ _STATIC = Path(__file__).resolve().parent / "static"
 # Target for UI shapefile uploads (own workspace/datastore, separate from the
 # curated `ispra` data).
 _UPLOAD_WS = (os.environ.get("GEO_UPLOAD_WORKSPACE") or "uploads").strip()
+# Let the LLM write title/abstract/keywords for an uploaded layer, so the chat
+# can find it by subject instead of by file name (mcp_geo_server.metadata).
+_UPLOAD_AI_METADATA = (os.environ.get("GEO_UPLOAD_AI_METADATA") or "false"
+                       ).strip().lower() in {"1", "true", "yes", "on"}
 _UPLOAD_DS = (os.environ.get("GEO_UPLOAD_DATASTORE") or "uploads_pg").strip()
 _UPLOAD_PG = PgConn(
     host=(os.environ.get("POSTGIS_HOST") or "postgis").strip(),
@@ -64,6 +66,9 @@ _UPLOAD_PG = PgConn(
     schema=(os.environ.get("POSTGIS_SCHEMA") or "public").strip(),
 )
 
+from mcp_geo_server import telemetry as _telemetry
+
+_telemetry.setup("mcp-geo-server-webui")
 app = FastAPI(title="mcp-geo-server test UI")
 # Starlette runs the LAST-added middleware first: auth, then the rate limit, so
 # anonymous traffic is rejected before it can consume someone's quota.
@@ -71,46 +76,24 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(BasicAuthMiddleware)
 
 # Lazily-built LLM resolver (no GeoServer tools — it only maps NL -> layer names).
-_RESOLVER = None
-_RESOLVER_INSTRUCTIONS = (
-    "You map an Italian (or English) natural-language map request to GeoServer "
-    "layers chosen from a catalog the user gives you. Reply with ONLY a single "
-    "JSON object, no prose, no code fences:\n"
-    '{"layers": ["<exact qualified name from the catalog>", ...], '
-    '"cql_filter": null, "explanation": "<one short sentence, in the user\'s '
-    'language>"}\n'
-    "Rules:\n"
-    "- pick ONLY names that appear verbatim in the catalog; match the request "
-    "against each layer's SUBJECT (its name, title and keywords).\n"
-    "- A place name (region/province/comune, e.g. \"Valle d'Aosta\", \"Bari\") "
-    "only restricts the AREA shown — the area clip is applied automatically "
-    "afterwards. Use the place to choose a layer ONLY when the requested subject "
-    "has per-place variants (e.g. landslide layers exist per region); otherwise "
-    "ignore the place when selecting. NEVER add a layer of a DIFFERENT subject "
-    "just because its name contains the place. Example: \"DTM della Valle "
-    "d'Aosta\" -> the DTM / elevation layer ONLY (subject = DTM), NOT the "
-    "landslide layers of Valle d'Aosta.\n"
-    "- return as FEW layers as possible — only those whose subject was asked "
-    "for; include several only when the request is genuinely ambiguous.\n"
-    "- cql_filter: when the user asks for a SUBSET by an attribute value (e.g. "
-    "'alta/elevata pericolosità'), build a CQL using ONLY the attributes and "
-    "EXACT values listed under 'Filterable attributes'; otherwise null. Never "
-    "invent layer, column or value names.\n"
-    "- an attribute exists ONLY on the layers matching its pattern in "
-    "'Filterable attributes'. If you build a cql_filter on an attribute, you "
-    "MUST select a layer whose name matches that attribute's pattern — e.g. a "
-    "hazard-class filter goes on the hazard layer, NOT on a landslide-inventory "
-    "layer that lacks that column."
-)
+# Resolver tiers (primary model + optional fallback) and the catalog
+# retriever, built lazily on the first request.
+_RESOLVER_TIERS: list | None = None
+_RETRIEVER = _retrieval.retriever_from_env()
+_MIN_CONFIDENCE = _resolver.min_confidence_from_env()
+_RESOLVER_INSTRUCTIONS = _resolver.INSTRUCTIONS
+# Schema-constrained replies (GEO_RESOLVER_STRUCTURED=false to turn off, e.g.
+# for a backend that rejects JSON-schema output; there is also an automatic
+# one-shot fallback when the constrained call fails).
+_RESOLVER_STRUCTURED = (os.environ.get("GEO_RESOLVER_STRUCTURED") or "true"
+                        ).strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _get_resolver():
-    global _RESOLVER
-    if _RESOLVER is None:
-        client = _build_chat_client(get_settings())
-        _RESOLVER = client.as_agent(name="layer-resolver",
-                                    instructions=_RESOLVER_INSTRUCTIONS, tools=[])
-    return _RESOLVER
+def _get_resolver_tiers() -> list:
+    global _RESOLVER_TIERS
+    if _RESOLVER_TIERS is None:
+        _RESOLVER_TIERS = _resolver.tiers_from_settings(_RESOLVER_INSTRUCTIONS)
+    return _RESOLVER_TIERS
 
 
 async def _guard(coro: Any) -> Any:
@@ -449,8 +432,17 @@ async def upload_shapefile(file: UploadFile = File(...),
         await _guard(publish(_UPLOAD_WS, _UPLOAD_DS, table, srs=srs, title=shp.stem))
         bbox = await featuretype_bbox(_UPLOAD_WS, table)
 
+    metadata = None
+    if _UPLOAD_AI_METADATA:
+        from mcp_geo_server import metadata as _metadata
+        try:
+            rep = await _metadata.enrich_layer(_UPLOAD_WS, table)
+            metadata = {k: rep.get(k) for k in ("status", "title", "keywords", "reason")}
+        except Exception as exc:  # noqa: BLE001 — metadata is best-effort
+            metadata = {"status": "failed", "reason": str(exc)}
     _invalidate_catalog()  # the new layer must be askable right away
-    return {"workspace": _UPLOAD_WS, "datastore": _UPLOAD_DS, "layer": table,
+    return {"metadata": metadata,
+            "workspace": _UPLOAD_WS, "datastore": _UPLOAD_DS, "layer": table,
             "qualified": f"{_UPLOAD_WS}:{table}", "bbox": bbox}
 
 
@@ -518,225 +510,59 @@ async def api_layer_bbox(workspace: str, name: str) -> dict:
 
 class AskIn(BaseModel):
     query: str
+    # The current map state from the previous answer, for follow-up turns
+    # ("solo quelle ad alta pericolosità"): {layers, cql_filter, admin}. The
+    # client keeps it; the server holds no conversation state.
+    context: dict | None = None
 
 
-_FILTER_HINTS: str | None = None
+_FILTER_SPEC: _resolver.FilterSpec | None = None
 
 
-def _filter_hints() -> str:
+def _filter_spec() -> _resolver.FilterSpec:
     """Filterable attributes + allowed values, derived from the style config.
 
     Lets the LLM build a valid ``cql_filter`` (e.g. high hazard classes) using
-    real column names and exact values — generic, no domain hardcoding.
+    real column names and exact values, and lets the CQL guard reject anything
+    else — generic, no domain hardcoding.
     """
-    global _FILTER_HINTS
-    if _FILTER_HINTS is None:
-        cfg = _load_style_config()
-        styles = cfg.get("styles", {})
-        assign = cfg.get("assign", []) or []
-        attrs: dict[str, dict] = {}
-        style_attr: dict[str, str] = {}
-        for sname, spec in styles.items():
-            attr, classes = spec.get("attribute"), spec.get("classes")
-            if not (attr and classes):
-                continue
-            style_attr[sname] = attr
-            d = attrs.setdefault(attr, {"values": [], "patterns": set()})
-            for c in classes:
-                pair = (str(c.get("value")), str(c.get("label", "")))
-                if pair not in d["values"]:
-                    d["values"].append(pair)
-        # Attach the layer-name patterns (from the assign rules) each attribute
-        # lives on, so the resolver filters only layers that HAVE the attribute.
-        for rule in assign:
-            attr = style_attr.get(rule.get("style"))
-            pat = rule.get("name_contains") or rule.get("name_matches")
-            if attr and pat:
-                attrs[attr]["patterns"].add(str(pat))
-        if not attrs:
-            _FILTER_HINTS = ""
-        else:
-            lines = ["Filterable attributes — each exists ONLY on layers whose "
-                     "name matches the given pattern; to filter by it you MUST "
-                     "pick such a layer (use EXACT values in cql_filter):"]
-            for a, d in attrs.items():
-                vals = ", ".join(f"'{v}' ({lbl})" if lbl else f"'{v}'"
-                                 for v, lbl in d["values"])
-                pats = " | ".join(sorted(d["patterns"])) or "(any)"
-                lines.append(f"- {a} (layers matching: {pats}): {vals}")
-            _FILTER_HINTS = "\n".join(lines)
-    return _FILTER_HINTS
+    global _FILTER_SPEC
+    if _FILTER_SPEC is None:
+        _FILTER_SPEC = _resolver.filter_spec(_load_style_config())
+    return _FILTER_SPEC
 
 
 # ---- admin-area (comune / provincia / regione) spatial scoping -----------
-# When a chat request names an administrative unit, zoom to it and CLIP the
-# rendered layers to its exact boundary. ISTAT boundary layers, most specific
-# first (a comune match beats a regione match). Workspace defaults to the
-# catalog workspace; override with GEO_ADMIN_WORKSPACE.
-_ADMIN_WS = (os.environ.get("GEO_ADMIN_WORKSPACE") or "").strip()
-_ADMIN_LEVELS = [
-    {"level": "comune",    "layer": "com01012023_g",    "attr": "comune"},
-    {"level": "provincia", "layer": "provcm01012023_g", "attr": "den_uts"},
-    {"level": "regione",   "layer": "reg01012023_g",    "attr": "den_reg"},
-]
-_ADMIN_INDEX: list[tuple[str, dict, str]] | None = None
-_ADMIN_SCOPE_CACHE: dict[tuple[str, str], dict | None] = {}
+# Which boundary layers exist is domain config (`admin:` in styles.yml), read
+# by mcp_geo_server.places; the matching + geometry logic lives there too.
+_ADMIN_AREAS: _places.AdminAreas | None = None
 
 
-def _admin_ws() -> str:
-    return _ADMIN_WS or (get_client().settings.default_workspace or "")
+def _admin_areas() -> _places.AdminAreas:
+    global _ADMIN_AREAS
+    if _ADMIN_AREAS is None:
+        _ADMIN_AREAS = _places.AdminAreas(_places.admin_config(_load_style_config()))
+    return _ADMIN_AREAS
 
 
-def _demojibake(s: str) -> str:
-    """Repair classic double-encoded latin-1/UTF-8 text ('AgliÃ¨' -> 'Agliè').
-
-    Some boundary layers were loaded with the wrong encoding, so the DB holds
-    the mojibake. Used only for MATCHING against user text and for display — the
-    raw stored value is still used in the CQL filter that fetches the geometry.
-    """
-    try:
-        return s.encode("latin-1").decode("utf-8")
-    except (UnicodeEncodeError, UnicodeDecodeError):
-        return s
+async def _detect_admin(query: str):
+    """The admin unit named in the query, if any: ``(AdminLevel, raw_name)``."""
+    return await _admin_areas().detect(query)
 
 
-def _norm_admin(s: str) -> str:
-    """Accent/case/punctuation-insensitive key for matching place names."""
-    import unicodedata
-    s = _demojibake(s)
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(c for c in s if not unicodedata.combining(c))
-    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+async def _admin_from_context(context: dict | None):
+    """``(AdminLevel, raw_name)`` of the previous turn's area, if still valid."""
+    area = (context or {}).get("admin") or {}
+    level_name, raw = area.get("level"), area.get("raw")
+    if not (level_name and raw):
+        return None
+    level = next((lv for lv in _admin_areas().cfg.levels if lv.level == level_name), None)
+    return (level, raw) if level else None
 
 
-async def _admin_names(level: dict) -> list[str]:
-    """Raw stored names for one boundary layer (geometry excluded)."""
-    client = get_client()
-    try:
-        resp = await client.ows(
-            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
-             "typeNames": f"{_admin_ws()}:{level['layer']}",
-             "propertyName": level["attr"], "count": "20000",
-             "outputFormat": "application/json"},
-            base=client.settings.wfs_base)
-        import json as _json
-        data = _json.loads(resp.text)
-        return [f.get("properties", {}).get(level["attr"])
-                for f in data.get("features", [])
-                if f.get("properties", {}).get(level["attr"])]
-    except (GeoServerError, ValueError):
-        return []
-
-
-async def _admin_index() -> list[tuple[str, dict, str]]:
-    """Build ``(normalized_name, level, raw_name)`` once (cached process-wide)."""
-    global _ADMIN_INDEX
-    if _ADMIN_INDEX is None:
-        idx: list[tuple[str, dict, str]] = []
-        for level in _ADMIN_LEVELS:
-            for raw in await _admin_names(level):
-                n = _norm_admin(raw)
-                if len(n) >= 3:  # skip 2-letter names (false-positive prone)
-                    idx.append((n, level, raw))
-        _ADMIN_INDEX = idx
-    return _ADMIN_INDEX
-
-
-# Level keywords in the query force that admin level (e.g. 'provincia di Bari'
-# should scope to the province, not the comune that shares the name).
-_LEVEL_HINTS = {
-    "regione": "regione", "regionale": "regione",
-    "provincia": "provincia", "provincie": "provincia", "prov": "provincia",
-    "metropolitana": "provincia",  # 'città metropolitana di ...'
-    "comune": "comune",
-}
-
-
-def _level_hint(q_norm: str) -> str | None:
-    """The admin level explicitly named in the (normalized) query, if any."""
-    tokens = set(q_norm.split())
-    for kw, lvl in _LEVEL_HINTS.items():
-        if kw in tokens:
-            return lvl
-    return None
-
-
-async def _detect_admin(query: str) -> tuple[dict, str] | None:
-    """The admin unit named in the query, if any.
-
-    Matches whole normalized phrases (space-padded) so 'regione' won't spuriously
-    match a 2-letter comune. If the query names a level ('provincia di Bari'),
-    that level wins; otherwise the most specific (then longest) match wins.
-    """
-    q_norm = _norm_admin(query)
-    q = f" {q_norm} "
-    hint = _level_hint(q_norm)
-    order = {lvl["level"]: i for i, lvl in enumerate(_ADMIN_LEVELS)}
-    best: tuple[dict, str] | None = None
-    best_key = (99, 99, 0)
-    for n, level, raw in await _admin_index():
-        if f" {n} " in q:
-            lvl = level["level"]
-            # 0 if it matches the level the user named, else 1 (hint wins).
-            hint_rank = 0 if (hint and lvl == hint) else 1
-            # Then the LONGEST phrase match (a fuller name like "valle d aosta"
-            # beats the substring "aosta"), then the most specific level.
-            key = (hint_rank, -len(n), order[lvl])
-            if key < best_key:
-                best_key, best = key, (level, raw)
-    return best
-
-
-async def _admin_scope(level: dict, raw_name: str) -> dict | None:
+async def _admin_scope(level, raw_name: str) -> dict | None:
     """Zoom bbox + clip WKT (EPSG:4326) for one admin unit. Cached."""
-    ck = (level["layer"], raw_name)
-    if ck in _ADMIN_SCOPE_CACHE:
-        return _ADMIN_SCOPE_CACHE[ck]
-    client = get_client()
-    scope = None
-    try:
-        cql = f"{level['attr']}='{raw_name.replace(chr(39), chr(39) * 2)}'"
-        resp = await client.ows(
-            {"service": "WFS", "version": "2.0.0", "request": "GetFeature",
-             "typeNames": f"{_admin_ws()}:{level['layer']}", "cql_filter": cql,
-             "count": "1", "srsName": "EPSG:4326",
-             "outputFormat": "application/json"},
-            base=client.settings.wfs_base)
-        import json as _json
-        feats = _json.loads(resp.text).get("features", [])
-        geom_json = feats[0].get("geometry") if feats else None
-        if geom_json:
-            import shapely
-            from shapely.geometry import shape
-            geom = shape(geom_json)
-            minx, miny, maxx, maxy = geom.bounds
-
-            def _clip_wkt(g):
-                # Simplify to fit the WMS tile GET URL (Tomcat caps the request
-                # line at ~8 KB), then SNAP coordinates to a grid: raw simplified
-                # vertices carry FP noise (differing at the 15th decimal) that
-                # makes JTS throw "non-noded intersection" when GeoServer clips a
-                # vector layer. Snapping + make_valid removes those slivers.
-                g = shapely.set_precision(g, 1e-6)
-                if not g.is_valid:
-                    g = g.buffer(0)
-                return g.wkt
-
-            tol = 0.001
-            wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
-            while len(wkt) > 3500 and tol < 1:
-                tol *= 2
-                wkt = _clip_wkt(geom.simplify(tol, preserve_topology=True))
-            scope = {
-                "level": level["level"],
-                "name": _demojibake(raw_name),
-                "bbox": {"minx": minx, "miny": miny, "maxx": maxx, "maxy": maxy},
-                "clip": f"SRID=4326;{wkt}",
-            }
-    except Exception:  # noqa: BLE001 — scoping is best-effort, never fail the ask
-        scope = None
-    _ADMIN_SCOPE_CACHE[ck] = scope
-    return scope
+    return await _admin_areas().scope(level, raw_name)
 
 
 # Terrain-metric intent: words that mean the user wants a DTM-derived metric
@@ -753,15 +579,8 @@ _METRIC_HINTS = {
 
 def _metric_intent(query: str) -> list[str]:
     """Terrain metrics named in the query (normalized, accent-insensitive)."""
-    toks = set(_norm_admin(query).split())
+    toks = set(_places.norm(query).split())
     return sorted({v for k, v in _METRIC_HINTS.items() if k in toks})
-
-
-def _cql_attributes(cql: str) -> set[str]:
-    """Attribute names referenced by a CQL filter (identifiers before an op)."""
-    return set(re.findall(
-        r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|<>|!=|<=|>=|<|>|\bLIKE\b|\bILIKE\b|"
-        r"\bIN\b|\bBETWEEN\b|\bIS\b)", cql, re.I))
 
 
 @app.post("/api/ask")
@@ -776,12 +595,14 @@ async def ask(body: AskIn) -> dict:
         raise HTTPException(status_code=400, detail="empty query.")
 
     catalog = await _load_catalog()
-    prompt = (f"{catalog_prompt(catalog)}\n\n{_filter_hints()}\n\n"
-              f"Request: {query}\n\nJSON:")
+    spec = _filter_spec()
     try:
-        resolver = _get_resolver()
-        result = await resolver.run(prompt)
-        selection = validate_selection(result.text, catalog)
+        selection = await _resolver.resolve_routed(
+            _get_resolver_tiers(), query, catalog, spec,
+            min_confidence=_MIN_CONFIDENCE, structured=_RESOLVER_STRUCTURED,
+            guard=False, retriever=_RETRIEVER,
+            prompt_cache=_resolver.prompt_cache_from_env(),
+            context=body.context)
     except ValueError as exc:
         raise HTTPException(status_code=502,
                             detail=f"could not parse model reply: {exc}") from exc
@@ -842,10 +663,16 @@ async def ask(body: AskIn) -> dict:
     # that lacks the column makes GeoServer fail the ENTIRE render (that is why
     # "pericolosità elevata" over a landslide-inventory layer showed nothing).
     # The server decides, per layer, whether the filter applies.
+    # CQL guard: parse the model's filter, allow only the attributes the
+    # selected layers really have (style config + actual columns) and the exact
+    # configured values; otherwise drop it and say why (`cql_rejected`).
+    selection.pop("raw", None)
+    _resolver.guard_cql(selection, spec,
+                        {e["qualified"]: set(e.get("fields") or []) for e in info})
     cql = selection.get("cql_filter")
     cql_by_layer: dict[str, str] = {}
     if cql:
-        attrs = _cql_attributes(cql)
+        attrs = _cql.attributes(_cql.parse(cql))
         for e in info:
             fields = set(e.get("fields") or [])
             if attrs and attrs <= fields:
@@ -858,11 +685,19 @@ async def ask(body: AskIn) -> dict:
     # filter instead — a predicate (no geometry overlay), so it avoids the JTS
     # "non-noded intersection" crash that `clip` triggers on dense/imperfect
     # vector layers (e.g. the ~900k-polygon PAI mosaic).
+    # The area: named in this request; else the place the model read (catches
+    # phrasings the exact matcher misses); else, on a refinement, the area of
+    # the previous turn ("solo le più pericolose" stays in Puglia).
     admin = await _detect_admin(query)
+    if not admin and selection.get("place"):
+        admin = await _detect_admin(selection["place"])
+    if not admin and selection.get("mode") == "refine":
+        admin = await _admin_from_context(body.context)
     if admin:
         scope = await _admin_scope(*admin)
         if scope:
-            selection["admin"] = {"level": scope["level"], "name": scope["name"]}
+            selection["admin"] = {"level": scope["level"], "name": scope["name"],
+                                  "raw": admin[1]}
             selection["bbox"] = scope["bbox"]   # override: zoom to the unit
             selection["clip"] = scope["clip"]   # client applies it to RASTERS
             wkt = scope["clip"].split(";", 1)[-1]  # bare WKT for CQL
@@ -880,7 +715,8 @@ async def ask(body: AskIn) -> dict:
     # curvature), compute it on the selected VECTOR layers by sampling a DTM,
     # bounded to the current area. The raster is the sampling source (a DTM in
     # the selection, else auto-picked). Best-effort — never fails the ask.
-    wanted_metrics = _metric_intent(query)
+    # Metrics: the model's reading, plus the keyword match as a safety net.
+    wanted_metrics = sorted(set(_metric_intent(query)) | set(selection.get("metrics") or []))
     vector_layers = [i["qualified"] for i in info if i.get("kind") == "vector"]
     if wanted_metrics and vector_layers:
         from mcp_geo_server import enrich as _enrich
@@ -950,6 +786,39 @@ async def enrich_endpoint(body: EnrichIn) -> dict:
     except Exception as exc:  # noqa: BLE001 — surface enrichment errors
         raise HTTPException(status_code=400,
                             detail=f"enrichment failed: {exc}") from exc
+
+
+# ---- thematic style from a sentence (mcp_geo_server.style_ai) --------------
+class StyleAskIn(BaseModel):
+    layer: str                        # qualified, e.g. ispra:frane_poly_molise_opendata
+    instruction: str                  # "colora per tipo di movimento, toni caldi"
+    attribute: str | None = None      # skip the model's column choice
+    apply: bool = False               # publish + set as the layer's default style
+
+
+@app.post("/api/style")
+async def style_from_text(body: StyleAskIn) -> dict:
+    """Design a categorical style from an instruction; optionally apply it.
+
+    Returns the styles.yml entry (``spec`` + ``yaml`` to paste into
+    data/styles.yml) and whether it was applied. The model only labels and
+    colours the attribute's REAL values; the SLD is generated by the config
+    engine, never written by the model.
+    """
+    from mcp_geo_server import style_ai
+    if not body.instruction.strip():
+        raise HTTPException(status_code=400, detail="empty instruction.")
+    try:
+        p = await style_ai.propose(body.layer, body.instruction, attribute=body.attribute)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — LLM/transport errors -> 502
+        raise HTTPException(status_code=502, detail=f"style design failed: {exc}") from exc
+    if body.apply:
+        await _guard(style_ai.apply(p))
+    return {"name": p["name"], "layer": p["layer"], "attribute": p["attribute"],
+            "reason": p["reason"], "spec": p["spec"], "yaml": p["yaml"],
+            "applied": body.apply}
 
 
 @app.get("/healthz")

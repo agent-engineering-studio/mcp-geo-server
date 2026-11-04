@@ -12,11 +12,13 @@ Documento redatto il 2026-11-04. Stato del codice analizzato: commit `effbdba`.
 
 | Fase | Stato | PR |
 |---|---|---|
-| 0 — debiti D1–D4, D7 | in review | #9 |
-| 1 — eval, output strutturato, guardrail CQL | in review | #11 |
-| 2 — `resolve.py`/`places.py`, metadata AI, OpenTelemetry | in review | #12 |
-| 3 — retrieval per famiglie, router di modelli, prompt caching | in review | #14 |
-| 4–6 | da fare | — |
+| 0 — debiti D1–D4, D7 | in `main` | #9 |
+| 1 — eval, output strutturato, guardrail CQL | review: #11 → in `main` con questa PR | #11, #16 |
+| 2 — `places.py`, metadata AI, OpenTelemetry | review: #12 → in `main` con questa PR | #12, #16 |
+| 3 — retrieval per famiglie, router di modelli, prompt caching | review: #14 → in `main` con questa PR | #14, #16 |
+| 4 — chat a più turni, intent dal modello, stili da testo | review: #15 → in `main` con questa PR | #15, #16 |
+| 5 — tool MCP di alto livello | da fare | — |
+| 6 — analitica, report, QA visivo | da fare | — |
 
 Nota: nessuna fase ha ancora una baseline misurata su un LLM reale; il primo
 passo dopo il merge è `make eval-resolver ARGS="--record runs/<modello>.json"`.

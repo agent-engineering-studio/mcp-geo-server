@@ -110,6 +110,21 @@ services:
       GEO_INIT_RASTER_PREPROCESS: ${GEO_INIT_RASTER_PREPROCESS:-false}
       GEO_INIT_RASTER_PROCESSED_DIR: /data-processed
       GEO_INIT_STYLES: ${GEO_INIT_STYLES:-true}
+      GEO_INIT_AI_METADATA: ${GEO_INIT_AI_METADATA:-false}
+      GEO_AI_METADATA_LANGUAGE: ${GEO_AI_METADATA_LANGUAGE:-Italian}
+      # LLM backend, used only when GEO_INIT_AI_METADATA=true (same knobs as
+      # the webui / mcp services).
+      GEO_LLM_PROVIDER: ${GEO_LLM_PROVIDER:-ollama}
+      OLLAMA_HOST: http://host.docker.internal:11434
+      OLLAMA_LLM_MODEL: ${OLLAMA_LLM_MODEL:-${OLLAMA_MODEL:-qwen2.5}}
+      OLLAMA_CLOUD_HOST: ${OLLAMA_CLOUD_HOST:-https://ollama.com}
+      OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       # Thematic style config, read from the mounted ./data dir. Edit
       # data/styles.yml to restyle for any domain (falls back to the packaged
       # ISPRA default if the file is missing).
@@ -164,6 +179,9 @@ services:
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Terrain enrichment reads the DTM raster FILE directly (not WMS). The DTM
       # is referenced by its COVERAGE LAYER name and the file path is resolved
       # from GeoServer at runtime (works for ANY published DTM). GEO_DTM_PATH is
@@ -175,6 +193,16 @@ services:
       WEBUI_PASSWORD: ${WEBUI_PASSWORD:-}
       WEBUI_RATE_LIMIT: ${WEBUI_RATE_LIMIT:-30}
       GEO_CATALOG_TTL: ${GEO_CATALOG_TTL:-60}
+      GEO_RESOLVER_STRUCTURED: ${GEO_RESOLVER_STRUCTURED:-true}
+      GEO_RETRIEVAL: ${GEO_RETRIEVAL:-true}
+      GEO_RETRIEVAL_MIN_CATALOG: ${GEO_RETRIEVAL_MIN_CATALOG:-40}
+      GEO_LLM_FALLBACK_PROVIDER: ${GEO_LLM_FALLBACK_PROVIDER:-}
+      GEO_LLM_FALLBACK_MODEL: ${GEO_LLM_FALLBACK_MODEL:-}
+      GEO_LLM_CONFIDENCE_MIN: ${GEO_LLM_CONFIDENCE_MIN:-0.5}
+      GEO_PROMPT_CACHE: ${GEO_PROMPT_CACHE:-false}
+      GEO_UPLOAD_AI_METADATA: ${GEO_UPLOAD_AI_METADATA:-false}
+      GEO_AI_METADATA_LANGUAGE: ${GEO_AI_METADATA_LANGUAGE:-Italian}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
     ports:
       # Configurable host port so the UI can run beside another app on :8000 —
       # set WEBUI_HOST_PORT in .env (container always serves on 8000).
@@ -212,12 +240,16 @@ services:
       OLLAMA_API_KEY: ${OLLAMA_API_KEY:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-claude-sonnet-5-5}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_LLM_MODEL: ${OPENAI_LLM_MODEL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       GEO_MCP_TRANSPORT: http
       # Open bind inside the container (the app default is 127.0.0.1); the
       # port mapping below decides what the host exposes.
       GEO_MCP_HOST: 0.0.0.0
       GEO_MCP_PORT: "9000"
       GEO_ALLOW_DESTRUCTIVE: ${GEO_ALLOW_DESTRUCTIVE:-false}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       GEO_MAP_OUTPUT_DIR: /app/maps
       # DTM referenced by coverage layer; GEO_DTM_PATH is an optional override.
       GEO_DTM_PATH: ${GEO_DTM_PATH:-}

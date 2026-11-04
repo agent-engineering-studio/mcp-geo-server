@@ -1,0 +1,1020 @@
+[
+ {
+  "name": "aree_poly_abruzzo_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_abruzzo_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_basilicata_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_basilicata_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_bolzano_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_bolzano_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_calabria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_calabria_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_campania_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_campania_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_emilia_romagna_opendata",
+  "workspace": "ispra",
+  "title": "aree_poly_emilia-romagna_opendata",
+  "keywords": [
+   "features",
+   "aree_poly_emilia_romagna_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_friuli_venezia_giulia_opendata",
+  "workspace": "ispra",
+  "title": "aree_poly_friuli-venezia-giulia_opendata",
+  "keywords": [
+   "features",
+   "aree_poly_friuli_venezia_giulia_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_lazio_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_lazio_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_liguria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_liguria_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_lombardia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_lombardia_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_marche_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_marche_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_molise_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_molise_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_piemonte_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_piemonte_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_puglia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_puglia_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_sardegna_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_sardegna_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_sicilia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_sicilia_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_toscana_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_toscana_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_trento_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_trento_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_umbria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "aree_poly_umbria_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "aree_poly_valle_d_aosta_opendata",
+  "workspace": "ispra",
+  "title": "aree_poly_valle-d-aosta_opendata",
+  "keywords": [
+   "features",
+   "aree_poly_valle_d_aosta_opendata"
+  ]
+ },
+ {
+  "name": "aree_poly_veneto_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "aree_poly_veneto_opendata"
+  ]
+ },
+ {
+  "name": "carta_geolitologica",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "carta_geolitologica"
+  ]
+ },
+ {
+  "name": "clc2018_it",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "clc2018_it"
+  ]
+ },
+ {
+  "name": "com01012023_g",
+  "workspace": "ispra",
+  "title": "Com01012023_g",
+  "keywords": [
+   "features",
+   "com01012023_g"
+  ]
+ },
+ {
+  "name": "dgpv_poly_abruzzo_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_abruzzo_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_basilicata_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_basilicata_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_bolzano_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_bolzano_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_calabria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_calabria_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_campania_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "dgpv_poly_campania_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "dgpv_poly_emilia_romagna_opendata",
+  "workspace": "ispra",
+  "title": "dgpv_poly_emilia-romagna_opendata",
+  "keywords": [
+   "features",
+   "dgpv_poly_emilia_romagna_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_friuli_venezia_giulia_opendata",
+  "workspace": "ispra",
+  "title": "dgpv_poly_friuli-venezia-giulia_opendata",
+  "keywords": [
+   "features",
+   "dgpv_poly_friuli_venezia_giulia_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_lazio_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_lazio_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_liguria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_liguria_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_lombardia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_lombardia_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_marche_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_marche_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_molise_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "dgpv_poly_molise_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "dgpv_poly_piemonte_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_piemonte_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_puglia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_puglia_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_sardegna_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_sardegna_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_sicilia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_sicilia_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_toscana_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_toscana_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_trento_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_trento_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_umbria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "dgpv_poly_umbria_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_valle_d_aosta_opendata",
+  "workspace": "ispra",
+  "title": "dgpv_poly_valle-d-aosta_opendata",
+  "keywords": [
+   "features",
+   "dgpv_poly_valle_d_aosta_opendata"
+  ]
+ },
+ {
+  "name": "dgpv_poly_veneto_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "dgpv_poly_veneto_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "dtm",
+  "workspace": "ispra",
+  "title": "HRDTM5m",
+  "keywords": [
+   "HRDTM5m",
+   "WCS",
+   "GeoTIFF"
+  ]
+ },
+ {
+  "name": "frane_line_abruzzo_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_abruzzo_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_basilicata_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_basilicata_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_bolzano_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "frane_line_bolzano_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "frane_line_calabria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_calabria_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_campania_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_campania_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_emilia_romagna_opendata",
+  "workspace": "ispra",
+  "title": "frane_line_emilia-romagna_opendata",
+  "keywords": [
+   "frane_line_emilia_romagna_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "frane_line_friuli_venezia_giulia_opendata",
+  "workspace": "ispra",
+  "title": "frane_line_friuli-venezia-giulia_opendata",
+  "keywords": [
+   "features",
+   "frane_line_friuli_venezia_giulia_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_lazio_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_lazio_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_liguria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_liguria_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_lombardia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_lombardia_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_marche_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_marche_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_molise_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_molise_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_piemonte_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "frane_line_piemonte_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "frane_line_puglia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_puglia_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_sardegna_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_sardegna_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_sicilia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_sicilia_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_toscana_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_toscana_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_trento_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_trento_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_umbria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_umbria_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_valle_d_aosta_opendata",
+  "workspace": "ispra",
+  "title": "frane_line_valle-d-aosta_opendata",
+  "keywords": [
+   "features",
+   "frane_line_valle_d_aosta_opendata"
+  ]
+ },
+ {
+  "name": "frane_line_veneto_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_line_veneto_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_abruzzo_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_abruzzo_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_basilicata_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_basilicata_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_bolzano_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_bolzano_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_calabria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_calabria_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_campania_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_campania_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_emilia_romagna_opendata",
+  "workspace": "ispra",
+  "title": "frane_piff_emilia-romagna_opendata",
+  "keywords": [
+   "features",
+   "frane_piff_emilia_romagna_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_friuli_venezia_giulia_opendata",
+  "workspace": "ispra",
+  "title": "frane_piff_friuli-venezia-giulia_opendata",
+  "keywords": [
+   "features",
+   "frane_piff_friuli_venezia_giulia_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_lazio_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_lazio_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_liguria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_liguria_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_lombardia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_lombardia_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_marche_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_marche_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_molise_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_molise_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_piemonte_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_piemonte_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_puglia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_puglia_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_sardegna_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_sardegna_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_sicilia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_sicilia_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_toscana_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_toscana_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_trento_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_trento_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_umbria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_umbria_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_valle_d_aosta_opendata",
+  "workspace": "ispra",
+  "title": "frane_piff_valle-d-aosta_opendata",
+  "keywords": [
+   "features",
+   "frane_piff_valle_d_aosta_opendata"
+  ]
+ },
+ {
+  "name": "frane_piff_veneto_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_piff_veneto_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_abruzzo_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_abruzzo_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_basilicata_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_basilicata_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_bolzano_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_bolzano_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_calabria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_calabria_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_campania_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_campania_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_emilia_romagna_opendata",
+  "workspace": "ispra",
+  "title": "frane_poly_emilia-romagna_opendata",
+  "keywords": [
+   "features",
+   "frane_poly_emilia_romagna_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_friuli_venezia_giulia_opendata",
+  "workspace": "ispra",
+  "title": "frane_poly_friuli-venezia-giulia_opendata",
+  "keywords": [
+   "features",
+   "frane_poly_friuli_venezia_giulia_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_lazio_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_lazio_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_liguria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_liguria_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_lombardia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_lombardia_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_marche_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_marche_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_molise_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_molise_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_piemonte_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_piemonte_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_puglia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_puglia_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_sardegna_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "frane_poly_sardegna_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "frane_poly_sicilia_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_sicilia_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_toscana_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_toscana_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_trento_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_trento_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_umbria_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "features",
+   "frane_poly_umbria_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_valle_d_aosta_opendata",
+  "workspace": "ispra",
+  "title": "frane_poly_valle-d-aosta_opendata",
+  "keywords": [
+   "features",
+   "frane_poly_valle_d_aosta_opendata"
+  ]
+ },
+ {
+  "name": "frane_poly_veneto_opendata",
+  "workspace": "ispra",
+  "title": "",
+  "keywords": [
+   "frane_poly_veneto_opendata",
+   "features"
+  ]
+ },
+ {
+  "name": "mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai",
+  "workspace": "ispra",
+  "title": "Mosaicatura_ISPRA_2020_2021_aree_pericolosita_frana_PAI",
+  "keywords": [
+   "features",
+   "mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai"
+  ]
+ },
+ {
+  "name": "provcm01012023_g",
+  "workspace": "ispra",
+  "title": "ProvCM01012023_g",
+  "keywords": [
+   "features",
+   "provcm01012023_g"
+  ]
+ },
+ {
+  "name": "reg01012023_g",
+  "workspace": "ispra",
+  "title": "Reg01012023_g",
+  "keywords": [
+   "features",
+   "reg01012023_g"
+  ]
+ },
+ {
+  "name": "ripgeo01012023_g",
+  "workspace": "ispra",
+  "title": "RipGeo01012023_g",
+  "keywords": [
+   "features",
+   "ripgeo01012023_g"
+  ]
+ }
+]

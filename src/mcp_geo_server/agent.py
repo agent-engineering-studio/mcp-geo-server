@@ -113,6 +113,32 @@ def _build_chat_client(settings: Settings):
     )
 
 
+_MODEL_FIELD = {"ollama": "ollama_model", "ollama-cloud": "ollama_model",
+                "anthropic": "anthropic_model", "openai": "openai_model"}
+
+
+def settings_for(settings: Settings, provider: str, model: str | None = None) -> Settings:
+    """A copy of ``settings`` pointed at another provider (and model).
+
+    Used for a second, usually larger, model next to the primary one (the
+    resolver's fallback tier). Endpoints and keys stay the ones configured for
+    that provider.
+    """
+    import dataclasses
+
+    provider = provider.strip().lower()
+    if provider not in _MODEL_FIELD:
+        raise RuntimeError(f"Unknown provider '{provider}' (use {', '.join(_MODEL_FIELD)}).")
+    changes: dict = {"llm_provider": provider}
+    if model:
+        changes[_MODEL_FIELD[provider]] = model
+    return dataclasses.replace(settings, **changes)
+
+
+def model_name(settings: Settings) -> str:
+    return getattr(settings, _MODEL_FIELD.get(settings.llm_provider, "ollama_model"))
+
+
 def build_agent() -> Agent:
     """Build the GeoServer agent backed by the configured LLM provider."""
     settings = get_settings()

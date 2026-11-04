@@ -323,23 +323,70 @@ sequenceDiagram
 
 1. **The catalog comes from GeoServer.** The WMS GetCapabilities document gives
    each published layer's real `name`, `title`, `abstract` and `keywords`.
-2. **A small LLM "resolver" matches the request.** It has no tools and replies
-   in JSON only, with the layer name(s), an optional `cql_filter` and a short
-   explanation. Names that are not in the catalog are dropped, so a made-up
-   layer can never reach the map.
+2. **A small LLM "resolver" matches the request.** It has no tools, and its
+   reply is constrained by a JSON Schema built for each request: the layer
+   names are an `enum` of the real catalog, so the model can't produce a layer
+   that doesn't exist. The reply carries the layer name(s), an optional
+   `cql_filter`, a short explanation and a `confidence`. If a backend rejects
+   the schema (some OpenAI-compatible servers do), the call is retried once
+   without it, and names not in the catalog are still dropped. Set
+   `GEO_RESOLVER_STRUCTURED=false` to skip the schema altogether.
 3. **Filters use real values.** The style config lists the filterable
    attributes, their allowed values and the layers that carry them. With that,
    the resolver writes a filter like `per_fr_ita = 'Elevata P3'` for "high
    hazard", on a layer that really has that attribute.
+4. **Filters are checked before they reach WMS** (`mcp_geo_server/cql.py`).
+   The filter is parsed into a small, attribute-only subset of CQL: no
+   functions and no spatial predicates. Its attributes must exist on the
+   selected layers and categorical values must be the exact configured ones.
+   It is then rewritten in canonical form. A filter that fails is dropped,
+   the map shows the unfiltered data, and the response says why
+   (`cql_rejected`).
+
+5. **Only the relevant part of the catalog is shown** (`mcp_geo_server/retrieval.py`).
+   Catalogs are mostly *families* of layers that differ by one part of the
+   name: the same dataset per region, year or tile. The ISPRA catalog is
+   5 families × 21 regions, which is 105 of its 113 layers. Families are
+   found from the names alone. When the request names a variant ("frane in
+   Toscana"), each family is cut down to the matching members. Layers outside
+   any family, often with opaque names like `com01012023_g`, are always kept.
+   If no variant is named, the whole catalog is sent. On the golden set the
+   prompt drops from 113 to 13 layers whenever a region is named, and no
+   expected layer is ever cut. A plain top-k text ranking lost one in 8 of
+   29 cases. `GEO_RETRIEVAL=false` turns it off.
+6. **A second model when the first is unsure.** With `GEO_LLM_FALLBACK_PROVIDER`
+   (and optionally `GEO_LLM_FALLBACK_MODEL`), a reply with a confidence below
+   `GEO_LLM_CONFIDENCE_MIN` (default 0.5), or a failed call, is retried on the
+   fallback model. For example, a local Ollama model can go first and Claude
+   only when needed. The response reports `model`, `escalated` and why.
+7. **Prompt caching (Anthropic, opt-in).** `GEO_PROMPT_CACHE=true` sends the
+   static part of the prompt (the full catalog and the filter hints) as a
+   system block marked `cache_control`, so repeated requests reuse it. This
+   applies when retrieval didn't narrow the catalog. The request shape is
+   checked by a test with the real client; check the cache hit rate on your
+   account before relying on it.
+8. **Follow-up turns refine the map.** The page sends the current map back with
+   the next request (`context`: layers, filter, area). The model then returns
+   the complete new state and `mode: "refine"`. For example, "frane in
+   Campania" → "solo i crolli" → "aggiungi il DTM" → "togli il DTM" keeps the
+   layers and filter you didn't change, and the area of the previous turn.
+   A new subject comes back as `mode: "new"`. The server holds no
+   conversation state, and **Nuova mappa** in the chat starts over.
+9. **The model also reads intent.** `metrics` (elevation, slope, aspect,
+   curvature) is merged with the keyword match, so "quanto sono ripide" asks
+   for slope. `place` is used when the exact name matcher finds no
+   administrative unit in the request.
 
 The server then prepares the result for any map client:
 
 - **Draw order.** Layers come back bottom to top: rasters under vectors, the
   broadest raster lowest. An opaque raster never hides the vectors.
-- **Admin-area scoping.** If you name a *comune*, *provincia* or *regione* (from
-  the ISTAT boundary layers), the response includes the zoom `bbox` and a way to
-  limit each layer to that area. Rasters get an exact-polygon `clip`. Vectors
-  get a CQL `INTERSECTS` filter, which is robust on dense layers.
+- **Admin-area scoping.** If you name an administrative unit (by default a
+  *comune*, *provincia* or *regione* from the ISTAT boundary layers), the
+  response includes the zoom `bbox` and a way to limit each layer to that area.
+  Rasters get an exact-polygon `clip`. Vectors get a CQL `INTERSECTS` filter,
+  which is robust on dense layers. Which layers hold the boundaries is set in
+  the `admin:` section of `styles.yml` (see below), not in the code.
 - **Per-layer filters.** `cql_by_layer` applies a filter only to layers that
   have the attribute, so one filter can't break the whole map.
 - **Terrain analysis.** If you ask about elevation, slope, aspect or curvature,
@@ -401,6 +448,9 @@ make init-logs     # follow the geo-init logs
 | `GEO_INIT_STYLES` | `true` | Apply the thematic styles after publishing |
 | `GEO_STYLES_CONFIG` | `/data/styles.yml` | Style config file (falls back to the packaged default if missing) |
 | `GEO_UPLOAD_WORKSPACE` / `GEO_UPLOAD_DATASTORE` | `uploads` / `uploads_pg` | Target for UI shapefile uploads |
+| `GEO_INIT_AI_METADATA` / `GEO_UPLOAD_AI_METADATA` | `false` / `false` | Let the LLM write title/abstract/keywords for newly published / uploaded vector layers |
+| `GEO_AI_METADATA_LANGUAGE` | `Italian` | Language of the generated title and abstract (keywords are always IT + EN) |
+| `GEO_ADMIN_WORKSPACE` | _(from `admin.workspace`, else default workspace)_ | Workspace of the boundary layers used for area scoping |
 
 </details>
 
@@ -434,6 +484,72 @@ assign:                       # ordered rules, FIRST match wins (by layer name)
 
 `assign` rules match a layer **by name**, with `name_contains` for a substring or
 `name_matches` for a regex. The patterns are config for your domain, not code.
+
+The same file says which layers hold your **administrative boundaries**, for
+area scoping in the chat. Levels go most specific first, and `attr` is the
+column with the unit's name:
+
+```yaml
+admin:
+  levels:
+    - {level: comune,    layer: com01012023_g,    attr: comune}
+    - {level: provincia, layer: provcm01012023_g, attr: den_uts}
+    - {level: regione,   layer: reg01012023_g,    attr: den_reg}
+  level_hints:          # words that force a level: "provincia di Bari"
+    provincia: provincia
+    comune: comune
+```
+
+`admin: {}` turns area scoping off. A `styles.yml` with no `admin` section
+keeps the packaged ISTAT levels, and the log warns about it.
+
+### Styles from a sentence
+
+`mcp_geo_server/style_ai.py` turns *"colora le frane per tipo di movimento,
+toni caldi"* into a categorical style. The model never writes SLD: it fills a
+`styles.yml` entry that the config engine compiles, in two constrained steps:
+
+1. It picks the attribute from the layer's real columns.
+2. It gives a label and a colour to that attribute's real distinct values,
+   which the server reads over WFS.
+
+The symbolizer type comes from the geometry, and colours must be `#RRGGBB`.
+
+```bash
+make ai-style ARGS='ispra:frane_line_molise_opendata "colora per tipo di movimento, toni caldi"'
+make ai-style ARGS='ispra:frane_line_molise_opendata "..." --apply'   # publish + set as default
+```
+
+The same is available as `POST /api/style` (`{layer, instruction, attribute?,
+apply?}`). The output includes the YAML to paste into `data/styles.yml`.
+Without it, the next `make styles` puts back whatever the config assigns.
+
+### AI-written metadata
+
+The chat finds layers by their title, abstract and keywords. Layers published
+by the bootstrap or the upload page only have their folder or file name, for
+example `frane_poly_emilia-romagna_opendata`. `mcp_geo_server/metadata.py`
+profiles each layer: its columns, types, sample values, geometry and extent.
+An LLM then writes a title, an abstract with a short glossary of the fields,
+Italian and English keywords, and a suggested attribute to colour the map by.
+The reply is constrained by a schema and checked against the real columns.
+
+- **Never overwrites hand-written metadata.** It only replaces the automatic
+  kind, or its own earlier output, which it tags with the keyword
+  `metadata:ai`. `--overwrite` forces it.
+- **Vector layers only** for now.
+
+```bash
+make ai-metadata ARGS="--dry-run -v"        # preview for all layers, write nothing
+make ai-metadata                            # write it for the default workspace
+make ai-metadata ARGS="--layer frane_poly_molise_opendata --overwrite"
+```
+
+To do it automatically for new layers, set `GEO_INIT_AI_METADATA=true` for the
+bootstrap and `GEO_UPLOAD_AI_METADATA=true` for uploads. The bootstrap stops
+trying after 3 consecutive failures, so an unreachable LLM doesn't turn into
+one timeout per layer. To measure the effect, run the resolver eval against
+the live catalog before and after: `make eval-resolver ARGS="--catalog-live"`.
 
 ---
 
@@ -521,6 +637,12 @@ Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
 | `GEO_MAP_OUTPUT_DIR` | `./maps` | Where generated maps / downloaded PNGs are saved |
 | `WEBUI_PORT` | `8000` | Port for the web UI |
 | `WEBUI_USER` / `WEBUI_PASSWORD` | _(none)_ | When **both** are set, every web UI route except `/healthz` requires HTTP Basic auth |
+| `GEO_OTEL_ENABLE` / `OTEL_EXPORTER_OTLP_ENDPOINT` | `false` / _(none)_ | OpenTelemetry traces + `gen_ai.*` metrics; on when either is set (OTLP over HTTP, e.g. `http://collector:4318`). Prompts are exported only with `ENABLE_SENSITIVE_DATA=true` |
+| `GEO_RETRIEVAL` / `GEO_RETRIEVAL_MIN_CATALOG` | `true` / `40` | Show the resolver only the matching members of layer families; catalogs this small or smaller are sent whole |
+| `GEO_LLM_FALLBACK_PROVIDER` / `GEO_LLM_FALLBACK_MODEL` | _(none)_ | Second resolver model, used when the first fails or is unsure |
+| `GEO_LLM_CONFIDENCE_MIN` | `0.5` | Below this self-reported confidence the resolver escalates to the fallback model |
+| `GEO_PROMPT_CACHE` | `false` | Anthropic prompt caching of the static prompt part (catalog + filter hints) |
+| `GEO_RESOLVER_STRUCTURED` | `true` | Constrain the chat resolver's reply with a JSON Schema (falls back automatically if the backend rejects it) |
 | `WEBUI_RATE_LIMIT` | `30` | Requests per minute per client IP on `/api/ask`, `/api/enrich`, `/api/upload` (`0` = off) |
 | `GEO_CATALOG_TTL` | `60` | Seconds the chat caches the WMS layer catalog (`0` = no cache); an upload refreshes it |
 | `GEO_LLM_PROVIDER` | `ollama` | `ollama`, `ollama-cloud`, `anthropic` or `openai` |
@@ -665,8 +787,35 @@ GEO_RUN_INTEGRATION=1 pytest tests/integration    # live round-trip against a re
 - `test_styling` covers SLD generation from config and name-based style
   assignment.
 - `test_coveragestores` covers GeoTIFF / DTM publishing and raster discovery.
+- `test_cql`, `test_resolver` and `test_webui_ask` cover the CQL guard, the
+  structured resolver call with its fallback, and the `/api/ask` wiring.
 - `tests/evals/geo_eval.xml` holds read-only evaluation questions against sample
   data.
+
+### Evaluating the resolver
+
+`tests/evals/resolver/cases.yaml` is a golden set of 30 Italian and English
+requests over a snapshot of a real ISPRA catalog (113 layers). It includes the
+known traps, such as "DTM della Valle d'Aosta" (DTM only, no landslide
+layers) and hazard filters that belong on the PAI layer. The runner scores layer precision and
+recall, exact match, forbidden layers, CQL by meaning, parse errors,
+structured-output fallbacks and latency:
+
+```bash
+make eval-resolver                                   # live, with the configured LLM
+make eval-resolver ARGS="--record runs/qwen.json"    # …and save the raw replies
+make eval-resolver ARGS="--replay runs/qwen.json"    # re-score offline, no LLM call
+make eval-resolver ARGS="--only cql --min-exact 0.9" # a subset, with a gate
+```
+
+The report also counts `retrieval_misses` (expected layers that retrieval
+hid from the model), `mean_candidates` (layers shown per request) and
+`escalations` to the fallback model. `--no-retrieval` sends the whole catalog,
+for a side-by-side comparison.
+
+Replay lets you re-score an old recording after changing the guard. It also
+lets you compare providers and models side by side. CI scores a synthetic
+recording, so the golden set and the scoring can't drift apart.
 
 ### CI/CD
 
