@@ -50,14 +50,14 @@ def ask(monkeypatch):
     async def no_admin(query):
         return None
 
-    monkeypatch.setattr(webui_app, "_load_catalog", load_catalog)
-    monkeypatch.setattr(webui_app, "layer_bbox", layer_bbox)
-    monkeypatch.setattr(webui_app, "_layer_info", layer_info)
-    monkeypatch.setattr(webui_app, "_detect_admin", no_admin)
-    monkeypatch.setattr(webui_app, "_FILTER_SPEC", None)
+    assistant = webui_app._ASSISTANT
+    monkeypatch.setattr(assistant, "load_catalog", load_catalog)
+    monkeypatch.setattr(assistant, "layer_bbox", layer_bbox)
+    monkeypatch.setattr(assistant, "layer_info", layer_info)
+    monkeypatch.setattr(assistant, "detect_admin", no_admin)
 
     async def call(reply, query="q"):
-        monkeypatch.setattr(webui_app, "_RESOLVER_TIERS", [Tier(FakeAgent(reply), "ollama")])
+        monkeypatch.setattr(webui_app._ASSISTANT, "tiers", [Tier(FakeAgent(reply), "ollama")])
         transport = httpx.ASGITransport(app=webui_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             return await c.post("/api/ask", json={"query": query})
@@ -106,7 +106,7 @@ async def test_unparseable_reply_is_502(ask, monkeypatch):
             return _Result("no json")
 
     async def call():
-        monkeypatch.setattr(webui_app, "_RESOLVER_TIERS", [Tier(Broken(), "ollama")])
+        monkeypatch.setattr(webui_app._ASSISTANT, "tiers", [Tier(Broken(), "ollama")])
         transport = httpx.ASGITransport(app=webui_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             return await c.post("/api/ask", json={"query": "q"})
@@ -137,14 +137,14 @@ def ask_with_areas(ask, monkeypatch):
         return {"level": level.level, "name": raw, "clip": "SRID=4326;POINT(1 1)",
                 "bbox": {"minx": 0, "miny": 0, "maxx": 1, "maxy": 1}}
 
-    monkeypatch.setattr(webui_app, "_detect_admin", detect)
-    monkeypatch.setattr(webui_app, "_admin_scope", scope)
+    monkeypatch.setattr(webui_app._ASSISTANT, "detect_admin", detect)
+    monkeypatch.setattr(webui_app._ASSISTANT, "admin_scope", scope)
     return ask, seen
 
 
 async def _post(monkeypatch, reply, query, context):
     from webui import app as webui_app
-    monkeypatch.setattr(webui_app, "_RESOLVER_TIERS", [Tier(FakeAgent(reply), "ollama")])
+    monkeypatch.setattr(webui_app._ASSISTANT, "tiers", [Tier(FakeAgent(reply), "ollama")])
     transport = httpx.ASGITransport(app=webui_app.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
         return (await c.post("/api/ask", json={"query": query, "context": context})).json()

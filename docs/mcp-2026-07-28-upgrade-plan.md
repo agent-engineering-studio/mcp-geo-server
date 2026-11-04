@@ -15,6 +15,16 @@ Documento redatto il 2026-07-30. Stato del codice analizzato: commit `b86e61f`.
 > bind di default su `127.0.0.1`. Il disaccoppiamento proposto in §4 resta
 > valido per i suoi benefici (tool tipizzati, `annotations`, MRTR, nessun LLM
 > server-side), ma non è più obbligato dalla spec.
+>
+> **Aggiornamento (fase 5 della roadmap AI).** Il disaccoppiamento di §4 è
+> fatto: in modalità `tools` (default) il server è un `MCPServer` dell'SDK v2
+> con i 33 tool `geo_*` tipizzati e annotati (§5 Fase 1, punti 2–4), più i tool
+> di alto livello della roadmap AI, le resource `geo://catalog` e
+> `geo://layer/{ws}/{name}` (§6.3) e due prompt. `geoserver-agent` resta come
+> tool aggiuntivo (risposta alla questione 1 di §7: tenuto nello stesso
+> processo, ora possibile con agent-framework 1.24); `GEO_MCP_MODE=agent`
+> ripristina il server a tool singolo. Restano aperti: MRTR per l'approvazione
+> dei tool distruttivi (§6.1), MCP Apps (§6.2), `outputSchema` (§5 punto 5).
 
 ---
 

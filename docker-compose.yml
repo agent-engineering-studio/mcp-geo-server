@@ -194,6 +194,10 @@ services:
       WEBUI_RATE_LIMIT: ${WEBUI_RATE_LIMIT:-30}
       GEO_CATALOG_TTL: ${GEO_CATALOG_TTL:-60}
       GEO_RESOLVER_STRUCTURED: ${GEO_RESOLVER_STRUCTURED:-true}
+      # Domain config (filterable attributes, admin levels) for the resolver:
+      # the same file geo-init styles with, so a custom data/styles.yml applies
+      # to the chat too (falls back to the packaged default if missing).
+      GEO_STYLES_CONFIG: ${GEO_STYLES_CONFIG:-/data/styles.yml}
       GEO_RETRIEVAL: ${GEO_RETRIEVAL:-true}
       GEO_RETRIEVAL_MIN_CATALOG: ${GEO_RETRIEVAL_MIN_CATALOG:-40}
       GEO_LLM_FALLBACK_PROVIDER: ${GEO_LLM_FALLBACK_PROVIDER:-}
@@ -248,6 +252,14 @@ services:
       # port mapping below decides what the host exposes.
       GEO_MCP_HOST: 0.0.0.0
       GEO_MCP_PORT: "9000"
+      GEO_MCP_MODE: ${GEO_MCP_MODE:-tools}
+      GEO_MCP_AGENT_TOOL: ${GEO_MCP_AGENT_TOOL:-true}
+      # DNS-rebinding protection on the open bind: the Host header must match.
+      # Add the name your MCP clients use (e.g. a reverse-proxy host).
+      GEO_MCP_ALLOWED_HOSTS: ${GEO_MCP_ALLOWED_HOSTS:-localhost:*,127.0.0.1:*,mcp:*}
+      GEO_MCP_ALLOWED_ORIGINS: ${GEO_MCP_ALLOWED_ORIGINS:-}
+      # geo_resolve_request uses the same domain config as the chat.
+      GEO_STYLES_CONFIG: ${GEO_STYLES_CONFIG:-/data/styles.yml}
       GEO_ALLOW_DESTRUCTIVE: ${GEO_ALLOW_DESTRUCTIVE:-false}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       GEO_MAP_OUTPUT_DIR: /app/maps
