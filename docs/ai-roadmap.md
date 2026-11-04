@@ -8,17 +8,18 @@ ripetuti.
 
 Documento redatto il 2026-11-04. Stato del codice analizzato: commit `effbdba`.
 
-**Avanzamento** (aggiornato al 2026-11-04)
+**Avanzamento** (aggiornato al 2026-11-04): fasi 0–6 in `main`.
 
 | Fase | Stato | PR |
 |---|---|---|
 | 0 — debiti D1–D4, D7 | in `main` | #9 |
-| 1 — eval, output strutturato, guardrail CQL | review: #11 → in `main` con questa PR | #11, #16 |
-| 2 — `places.py`, metadata AI, OpenTelemetry | review: #12 → in `main` con questa PR | #12, #16 |
-| 3 — retrieval per famiglie, router di modelli, prompt caching | review: #14 → in `main` con questa PR | #14, #16 |
-| 4 — chat a più turni, intent dal modello, stili da testo | review: #15 → in `main` con questa PR | #15, #16 |
-| 5 — tool MCP di alto livello, server MCP v2 tipizzato | in review | #17 |
-| 6 — conteggi esatti, report d'area | in review | #18 |
+| 1 — eval, output strutturato, guardrail CQL | in `main` | #11 → #16 |
+| 2 — `places.py`, metadata AI, OpenTelemetry | in `main` | #12 → #16 |
+| 3 — retrieval per famiglie, router di modelli, prompt caching | in `main` | #14 → #16 |
+| 4 — chat a più turni, intent dal modello, stili da testo | in `main` | #15 → #16 |
+| 5 — tool MCP di alto livello, server MCP v2 tipizzato | in `main` | #17 |
+| 6 — conteggi esatti, report d'area | in `main` | #18 |
+| rinviati — text-to-SQL, QA visivo, relazioni spaziali "vicino a" | prerequisiti in §4.4 / §4.7 | — |
 
 Nota: nessuna fase ha ancora una baseline misurata su un LLM reale; il primo
 passo dopo il merge è `make eval-resolver ARGS="--record runs/<modello>.json"`.
