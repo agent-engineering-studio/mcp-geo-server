@@ -76,6 +76,19 @@ def test_raster_name_uses_folder_in_subfolder(tmp_path):
     assert raster_name_for(tif, tmp_path) == "lombardia"
 
 
+
+def test_raster_name_avoids_shapefile_in_same_folder(tmp_path):
+    from mcp_geo_server.bootstrap import layer_name_for, raster_name_for
+    sub = tmp_path / "clc2018_it"
+    sub.mkdir()
+    shp = sub / "CLC18_IT.shp"
+    tif = sub / "clc2018_it_100m.tif"
+    shp.touch()
+    tif.touch()
+    # CORINE ships vector + raster in one folder: both used to be `clc2018_it`.
+    assert layer_name_for(shp) == "clc2018_it"
+    assert raster_name_for(tif, tmp_path) == "clc2018_it_clc2018_it_100m"
+
 def _make_rasters(root: Path) -> None:
     for rel in ("dtm/HRDTM5m.tif", "clc2018_it/clc2018_it_100m.tif",
                 "lombardia/dtm.TIF", "lombardia/frane.shp"):
