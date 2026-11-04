@@ -37,6 +37,7 @@ import os
 
 from . import __version__
 from .config import get_settings
+from .retrieval import match_score as search_score
 
 logger = logging.getLogger("mcp_geo_server")
 
@@ -112,14 +113,6 @@ def _qualified(layer: str) -> tuple[str, str]:
     return ws, name
 
 
-def search_score(query: str, text: str) -> int:
-    """How many query words (4-letter stems, accent-insensitive) the text contains."""
-    from .places import norm
-
-    def stems(s: str) -> set[str]:
-        return {w[:4] if len(w) >= 5 else w for w in norm(s.replace("_", " ")).split()
-                if len(w) >= 3}
-    return len(stems(query) & stems(text))
 
 
 async def geo_search_layers(query: str, limit: int = 20) -> dict:
@@ -205,6 +198,75 @@ async def geo_resolve_request(query: str, context: dict | None = None) -> dict:
         return {"query": query, "error": str(exc), "layers": []}
 
 
+async def geo_count_features(layer: str, cql_filter: str | None = None,
+                             place: str | None = None, group_by: str | None = None) -> dict:
+    """Exact feature count of a layer, optionally inside an area and per class.
+
+    ``cql_filter``: attribute filter in simple CQL (=, <>, <, >, IN, LIKE,
+    BETWEEN, IS NULL, AND/OR/NOT). ``place``: an administrative unit ("provincia
+    di Bari") to count inside. ``group_by``: an attribute to break the count
+    down by (configured classes, else its real values). Counts come from WFS
+    ``resultType=hits``: exact, no sampling.
+    """
+    from . import analytics
+    from . import cql as cqlmod
+    from .answer import get_assistant
+
+    ws, name = _qualified(layer)
+    q = f"{ws}:{name}"
+    a = get_assistant()
+    info = await a.layer_info(ws, name)
+    if not info or info.get("geometry") == "raster":
+        return {"layer": q, "error": "not a vector layer"}
+    fields = set(info.get("fields") or [])
+    attr_filter = None
+    if cql_filter:
+        try:
+            attr_filter = cqlmod.sanitize(cql_filter, allowed_attributes=fields)
+        except cqlmod.CQLError as exc:
+            return {"layer": q, "error": f"cql_filter rejected: {exc}"}
+    area = None
+    area_filter = None
+    if place:
+        scope = await geo_admin_scope(place)
+        if not scope.get("found"):
+            return {"layer": q, "error": f"no administrative unit found in {place!r}"}
+        area = {"level": scope["level"], "name": scope["name"]}
+        wkt = scope["clip"].split(";", 1)[-1]
+        area_filter = f"INTERSECTS({info.get('geometry_column') or 'geom'}, {wkt})"
+    flt = analytics.combine(attr_filter, area_filter)
+    out = {"layer": q, "cql_filter": attr_filter, "area": area,
+           "total": await analytics.count(q, flt)}
+    if group_by:
+        if group_by not in fields:
+            out["error"] = f"{group_by} is not an attribute of {q}"
+            return out
+        values = await a.group_values(q, group_by, a.filter_spec())
+        if len(values) > analytics.MAX_GROUPS:
+            out["error"] = f"{group_by} has too many distinct values to group by"
+            return out
+        out["group_by"] = group_by
+        out["groups"] = await analytics.count_by(q, group_by, values, flt)
+    return out
+
+
+async def geo_area_report(place: str, subject: str | None = None,
+                          narrative: bool = False) -> dict:
+    """Fact sheet of the data in an administrative area, with exact counts.
+
+    For ``place`` (e.g. "provincia di Bari") and an optional ``subject``
+    ("frane"): which vector layers have features inside the area, how many,
+    and the breakdown per configured class; rasters covering it. Returns the
+    facts, a summary and a Markdown report. ``narrative`` adds a short LLM
+    synthesis, kept only if every number in it appears in the facts.
+    """
+    from . import report
+
+    rep = await report.area_report(place, subject, narrative=narrative)
+    return {k: rep[k] for k in ("facts", "summary", "narrative", "narrative_rejected",
+                                "markdown")}
+
+
 _AGENT = None
 
 
@@ -223,7 +285,7 @@ async def geoserver_agent(task: str) -> str:
 
 
 HIGH_LEVEL_TOOLS = (geo_search_layers, geo_describe_layer, geo_admin_scope,
-                    geo_resolve_request)
+                    geo_resolve_request, geo_count_features, geo_area_report)
 
 
 # ---- server ------------------------------------------------------------------------------------

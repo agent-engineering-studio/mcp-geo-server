@@ -16,7 +16,7 @@ from mcp_geo_server.tools import collect_tools  # noqa: E402
 pytestmark = pytest.mark.filterwarnings("ignore::DeprecationWarning")
 
 HIGH_LEVEL = ["geo_search_layers", "geo_describe_layer", "geo_admin_scope",
-              "geo_resolve_request"]
+              "geo_resolve_request", "geo_count_features", "geo_area_report"]
 
 
 @pytest.fixture(autouse=True)

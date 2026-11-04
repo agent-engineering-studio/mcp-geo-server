@@ -175,3 +175,20 @@ def retriever_from_env() -> Retriever | None:
         return None
     return Retriever(min_catalog=int(os.environ.get("GEO_RETRIEVAL_MIN_CATALOG")
                                      or DEFAULT_MIN_CATALOG))
+
+
+def layer_search_text(m: LayerMeta) -> str:
+    kws = [k for k in m.keywords if k.lower() not in ("features", "metadata:ai")]
+    return " ".join([m.name, m.title, " ".join(kws), m.abstract])
+
+
+def match_score(query: str, text: str) -> int:
+    """How many query words (4-letter stems, accent-insensitive) ``text`` contains.
+
+    A plain ranking for search tools, where returning a list is the point —
+    unlike :class:`Retriever`, which must never drop the layer the model needs.
+    """
+    def stems(s: str) -> set[str]:
+        return {w[:4] if len(w) >= 5 else w for w in norm(s.replace("_", " ")).split()
+                if len(w) >= 3}
+    return len(stems(query) & stems(text))

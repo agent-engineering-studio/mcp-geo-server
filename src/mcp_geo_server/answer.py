@@ -268,13 +268,67 @@ class MapAssistant:
                     cql_by_layer[q] = f"({base}) AND {spatial}" if base else spatial
         selection["cql_by_layer"] = cql_by_layer
 
-        metrics = sorted(set(metric_intent(query)) | set(selection.get("metrics") or []))
         vectors = [i["qualified"] for i in info if i.get("kind") == "vector"]
+
+        # Counting: the model says WHAT to count; GeoServer does the counting,
+        # with the very filters the map uses (so numbers match what is shown).
+        from . import analytics
+        agg = selection.get("aggregate") or {"kind": "none", "attribute": None}
+        if agg["kind"] == "none" and analytics.count_intent(query):
+            agg = {"kind": "count", "attribute": None}
+        selection["aggregate"] = agg
+        if agg["kind"] != "none" and vectors:
+            selection["analysis"] = await self._analyse(
+                agg, [e for e in info if e.get("kind") == "vector"], cql_by_layer, spec,
+                (selection.get("admin") or {}).get("name"))
+
+        metrics = sorted(set(metric_intent(query)) | set(selection.get("metrics") or []))
         if metrics and vectors:
             enrichment = await self._enrich(selection, info, vectors, metrics)
             if enrichment:
                 selection["enrichment"] = enrichment
         return selection
+
+    async def group_values(self, layer: str, attribute: str,
+                           spec: resolver.FilterSpec) -> list[tuple]:
+        """Values to group by: the configured classes, else the real distinct ones."""
+        configured = spec.values.get(attribute)
+        if configured:
+            return list(configured)
+        from .style_ai import distinct_values
+        ws, _, name = layer.partition(":")
+        try:
+            return [(v, str(v)) for v, _ in await distinct_values(ws, name, attribute)]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("distinct values of %s.%s unavailable: %s", layer, attribute, exc)
+            return []
+
+    async def _analyse(self, agg: dict, vectors: list[dict], cql_by_layer: dict,
+                       spec: resolver.FilterSpec, area: str | None) -> dict:
+        """Exact counts (and per-class counts) on up to 3 vector layers."""
+        from . import analytics
+        rows, lines = [], []
+        attr = agg.get("attribute")
+        for e in vectors[:3]:
+            q = e["qualified"]
+            total = await analytics.count(q, cql_by_layer.get(q))
+            groups, note = None, None
+            if agg["kind"] == "count_by" and attr:
+                if attr in (e.get("fields") or []):
+                    values = await self.group_values(q, attr, spec)
+                    if len(values) > analytics.MAX_GROUPS:
+                        note = f"{attr} ha troppi valori per un raggruppamento"
+                    elif values:
+                        groups = await analytics.count_by(q, attr, values, cql_by_layer.get(q))
+                else:
+                    note = f"{attr} non è un attributo di questo layer"
+            rows.append({"layer": q, "total": total, "groups": groups, "note": note})
+            line = analytics.describe(q, total, groups, attr, e.get("title"))
+            lines.append(line + (f" ({note})" if note else ""))
+        where = f" — {area}" if area else ""
+        title = f"Conteggio{where}"
+        return {"kind": agg["kind"], "attribute": attr, "layers": rows, "title": title,
+                "text": title + ":\n" + "\n".join(f"· {t}" for t in lines)}
 
     async def _enrich(self, selection: dict, info: list[dict], vectors: list[str],
                       metrics: list[str]) -> dict | None:

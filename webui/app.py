@@ -493,6 +493,34 @@ async def style_from_text(body: StyleAskIn) -> dict:
             "applied": body.apply}
 
 
+# ---- area report (mcp_geo_server.report) -----------------------------------
+@app.get("/api/report")
+async def area_report(place: str, subject: str | None = None, narrative: bool = False,
+                      format: str = "html") -> Response:
+    """Fact sheet of the data in an administrative area, with exact counts.
+
+    ``format``: ``html`` (a printable page), ``md`` or ``json``. ``narrative``
+    adds an LLM synthesis that is discarded if it quotes a number not in the
+    facts.
+    """
+    from mcp_geo_server import report
+    try:
+        rep = await report.area_report(place, subject, assistant=_ASSISTANT,
+                                       narrative=narrative)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except GeoServerError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if format == "md":
+        return Response(rep["markdown"], media_type="text/markdown; charset=utf-8")
+    if format == "json":
+        import json as _json
+        body = {k: rep[k] for k in ("facts", "summary", "narrative", "narrative_rejected")}
+        return Response(_json.dumps(body, ensure_ascii=False),
+                        media_type="application/json")
+    return Response(rep["html"], media_type="text/html; charset=utf-8")
+
+
 @app.get("/healthz")
 async def healthz() -> dict:
     """Liveness probe: no GeoServer/LLM call, and exempt from Basic auth."""

@@ -34,7 +34,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 AUTH_EXEMPT_PATHS = frozenset({"/healthz"})
 
 # Routes that cost LLM tokens or heavy compute — the ones worth throttling.
-RATE_LIMITED_PATHS = frozenset({"/api/ask", "/api/enrich", "/api/upload", "/api/style"})
+RATE_LIMITED_PATHS = frozenset({"/api/ask", "/api/enrich", "/api/upload", "/api/style",
+                                "/api/report"})
 
 _REALM = 'Basic realm="mcp-geo-server", charset="UTF-8"'
 
