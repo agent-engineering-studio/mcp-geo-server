@@ -117,3 +117,27 @@ assign:
   - {name_matches: "mosaicatura.*frana",     style: pericolosita_pai}
   - {name_matches: "^(com|provcm|reg|ripgeo)[0-9]", style: limiti_outline}
   - {name_matches: "(dtm|dem)",              style: dtm_elevation}
+
+# ----------------------------------------------------------------------------
+#  admin: administrative-area scoping for the chat (mcp_geo_server/places.py).
+#  When a request names a unit ("frane in provincia di Bari"), the map zooms to
+#  it and clips the layers to its boundary. `levels` lists the boundary layers,
+#  most specific first; `attr` is the column holding the unit's name.
+#  `level_hints` are words that force a level ("provincia di Bari" -> the
+#  province, not the comune of the same name). Remove the section to turn
+#  scoping off; GEO_ADMIN_WORKSPACE overrides `workspace`.
+# ----------------------------------------------------------------------------
+admin:
+  workspace: ""             # empty = GEOSERVER_DEFAULT_WORKSPACE
+  levels:
+    - {level: comune,    layer: com01012023_g,    attr: comune}
+    - {level: provincia, layer: provcm01012023_g, attr: den_uts}
+    - {level: regione,   layer: reg01012023_g,    attr: den_reg}
+  level_hints:
+    regione: regione
+    regionale: regione
+    provincia: provincia
+    provincie: provincia
+    prov: provincia
+    metropolitana: provincia   # "città metropolitana di ..."
+    comune: comune

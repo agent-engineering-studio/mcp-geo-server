@@ -73,6 +73,8 @@ def _configure_logging() -> None:
 def run() -> None:
     """Run the MCP server over the configured transport."""
     _configure_logging()
+    from .telemetry import setup as setup_telemetry
+    setup_telemetry("mcp-geo-server-mcp")
     settings = get_settings()
     server = build_mcp_server()
 

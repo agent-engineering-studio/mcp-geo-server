@@ -96,6 +96,11 @@ class BootstrapConfig:
             os.environ.get("GEO_INIT_RASTER_PROCESSED_DIR") or "/data-processed")
         # Apply the thematic SLD styles after publishing.
         self.styles = _env_bool("GEO_INIT_STYLES", True)
+        # Ask the LLM to write title/abstract/keywords for each NEWLY published
+        # vector layer (mcp_geo_server.metadata). Off by default: it needs a
+        # reachable LLM and adds one call per layer. Hand-written metadata is
+        # never replaced.
+        self.ai_metadata = _env_bool("GEO_INIT_AI_METADATA", False)
         # Shapefile attribute encoding. These ISPRA datasets ship a .cst file
         # (ISO-8859-1) which GDAL ignores (it only reads .cpg), so force it here
         # to keep Italian accents intact. Set empty to let GDAL auto-detect.
@@ -239,6 +244,13 @@ async def run() -> int:
     # 404 on a fresh catalog and spam GeoServer's log with ERROR stack traces).
     existing = await list_featuretype_names(cfg.workspace, cfg.datastore)
 
+    ai_meta = None
+    if cfg.ai_metadata:
+        from .metadata import BatchEnricher
+        from .telemetry import setup as setup_telemetry
+        setup_telemetry("mcp-geo-server-init")
+        ai_meta = BatchEnricher()
+
     loaded = published = failed = 0
     seen: dict[str, Path] = {}
     for shp in shapefiles:
@@ -259,6 +271,10 @@ async def run() -> int:
                              existing=existing):
                 existing.add(table)
                 published += 1
+                if ai_meta is not None:
+                    rep = await ai_meta(cfg.workspace, table)
+                    if rep and rep.get("status") == "written":
+                        logger.info("  AI metadata: %s", rep.get("title"))
         except Exception as exc:  # noqa: BLE001 — keep going on a bad dataset
             failed += 1
             logger.error("  FAILED %s: %s", shp.name, exc)

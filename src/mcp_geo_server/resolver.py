@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import cql as cqlmod
+from . import telemetry
 from .catalog import LayerMeta, _extract_json, catalog_prompt, validate_selection
 
 logger = logging.getLogger("mcp_geo_server.resolver")
@@ -212,6 +213,7 @@ def guard_cql(selection: dict, spec: FilterSpec,
             raw, allowed_attributes=allowed, allowed_values=spec.allowed_values)
     except cqlmod.CQLError as exc:
         logger.info("cql filter rejected (%s): %s", exc, raw)
+        telemetry.event("geo.cql.rejected", **{"geo.cql.reason": str(exc)})
         selection["cql_filter"] = None
         selection["cql_rejected"] = {"filter": raw, "reason": str(exc)}
     return selection
@@ -229,24 +231,41 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
     ``guard=False`` skips :func:`guard_cql`, for callers that know the layers'
     real columns and run it themselves (the web UI does).
     """
-    prompt = build_prompt(catalog, spec.hints(), query)
-    used_structured = False
-    result = None
-    if structured:
-        try:
-            fmt = response_format_for(provider, selection_schema(catalog))
-            result = await agent.run(prompt, options={"response_format": fmt})
-            used_structured = True
-        except Exception as exc:  # noqa: BLE001 — backend may not support schemas
-            logger.warning("structured resolver call failed (%s); retrying "
-                           "without a schema", exc)
-    if result is None:
-        result = await agent.run(prompt)
+    with telemetry.span("geo.resolve", **{
+            "gen_ai.provider.name": provider, "geo.catalog.size": len(catalog),
+            "geo.query.length": len(query), "geo.structured.requested": structured,
+    }) as sp:
+        prompt = build_prompt(catalog, spec.hints(), query)
+        used_structured = False
+        result = None
+        if structured:
+            try:
+                fmt = response_format_for(provider, selection_schema(catalog))
+                result = await agent.run(prompt, options={"response_format": fmt})
+                used_structured = True
+            except Exception as exc:  # noqa: BLE001 — backend may not support schemas
+                logger.warning("structured resolver call failed (%s); retrying "
+                               "without a schema", exc)
+        if result is None:
+            result = await agent.run(prompt)
 
-    text = result.text
-    selection = validate_selection(text, catalog)
-    selection["confidence"] = _confidence(_extract_json(text))
-    selection["structured"] = used_structured
-    selection["raw"] = text
-    selection.setdefault("cql_rejected", None)
-    return guard_cql(selection, spec) if guard else selection
+        text = result.text
+        selection = validate_selection(text, catalog)
+        reply = _extract_json(text)
+        requested = reply.get("layers") or []
+        requested = [requested] if isinstance(requested, str) else requested
+        selection["confidence"] = _confidence(reply)
+        selection["structured"] = used_structured
+        selection["raw"] = text
+        selection.setdefault("cql_rejected", None)
+        if guard:
+            guard_cql(selection, spec)
+        telemetry.set_attributes(sp, **{
+            "geo.structured.used": used_structured,
+            "geo.layers.count": len(selection["layers"]),
+            "geo.layers.dropped": max(0, len(requested) - len(selection["layers"])),
+            "geo.cql.present": bool(reply.get("cql_filter")),
+            "geo.cql.rejected": selection["cql_rejected"] is not None,
+            "geo.confidence": selection["confidence"],
+        })
+        return selection

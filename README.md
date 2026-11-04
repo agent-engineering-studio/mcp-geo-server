@@ -347,10 +347,12 @@ The server then prepares the result for any map client:
 
 - **Draw order.** Layers come back bottom to top: rasters under vectors, the
   broadest raster lowest. An opaque raster never hides the vectors.
-- **Admin-area scoping.** If you name a *comune*, *provincia* or *regione* (from
-  the ISTAT boundary layers), the response includes the zoom `bbox` and a way to
-  limit each layer to that area. Rasters get an exact-polygon `clip`. Vectors
-  get a CQL `INTERSECTS` filter, which is robust on dense layers.
+- **Admin-area scoping.** If you name an administrative unit (by default a
+  *comune*, *provincia* or *regione* from the ISTAT boundary layers), the
+  response includes the zoom `bbox` and a way to limit each layer to that area.
+  Rasters get an exact-polygon `clip`. Vectors get a CQL `INTERSECTS` filter,
+  which is robust on dense layers. Which layers hold the boundaries is set in
+  the `admin:` section of `styles.yml` (see below), not in the code.
 - **Per-layer filters.** `cql_by_layer` applies a filter only to layers that
   have the attribute, so one filter can't break the whole map.
 - **Terrain analysis.** If you ask about elevation, slope, aspect or curvature,
@@ -412,6 +414,9 @@ make init-logs     # follow the geo-init logs
 | `GEO_INIT_STYLES` | `true` | Apply the thematic styles after publishing |
 | `GEO_STYLES_CONFIG` | `/data/styles.yml` | Style config file (falls back to the packaged default if missing) |
 | `GEO_UPLOAD_WORKSPACE` / `GEO_UPLOAD_DATASTORE` | `uploads` / `uploads_pg` | Target for UI shapefile uploads |
+| `GEO_INIT_AI_METADATA` / `GEO_UPLOAD_AI_METADATA` | `false` / `false` | Let the LLM write title/abstract/keywords for newly published / uploaded vector layers |
+| `GEO_AI_METADATA_LANGUAGE` | `Italian` | Language of the generated title and abstract (keywords are always IT + EN) |
+| `GEO_ADMIN_WORKSPACE` | _(from `admin.workspace`, else default workspace)_ | Workspace of the boundary layers used for area scoping |
 
 </details>
 
@@ -445,6 +450,51 @@ assign:                       # ordered rules, FIRST match wins (by layer name)
 
 `assign` rules match a layer **by name**, with `name_contains` for a substring or
 `name_matches` for a regex. The patterns are config for your domain, not code.
+
+The same file says which layers hold your **administrative boundaries**, for
+area scoping in the chat. Levels go most specific first, and `attr` is the
+column with the unit's name:
+
+```yaml
+admin:
+  levels:
+    - {level: comune,    layer: com01012023_g,    attr: comune}
+    - {level: provincia, layer: provcm01012023_g, attr: den_uts}
+    - {level: regione,   layer: reg01012023_g,    attr: den_reg}
+  level_hints:          # words that force a level: "provincia di Bari"
+    provincia: provincia
+    comune: comune
+```
+
+`admin: {}` turns area scoping off. A `styles.yml` with no `admin` section
+keeps the packaged ISTAT levels, and the log warns about it.
+
+### AI-written metadata
+
+The chat finds layers by their title, abstract and keywords. Layers published
+by the bootstrap or the upload page only have their folder or file name, for
+example `frane_poly_emilia-romagna_opendata`. `mcp_geo_server/metadata.py`
+profiles each layer: its columns, types, sample values, geometry and extent.
+An LLM then writes a title, an abstract with a short glossary of the fields,
+Italian and English keywords, and a suggested attribute to colour the map by.
+The reply is constrained by a schema and checked against the real columns.
+
+- **Never overwrites hand-written metadata.** It only replaces the automatic
+  kind, or its own earlier output, which it tags with the keyword
+  `metadata:ai`. `--overwrite` forces it.
+- **Vector layers only** for now.
+
+```bash
+make ai-metadata ARGS="--dry-run -v"        # preview for all layers, write nothing
+make ai-metadata                            # write it for the default workspace
+make ai-metadata ARGS="--layer frane_poly_molise_opendata --overwrite"
+```
+
+To do it automatically for new layers, set `GEO_INIT_AI_METADATA=true` for the
+bootstrap and `GEO_UPLOAD_AI_METADATA=true` for uploads. The bootstrap stops
+trying after 3 consecutive failures, so an unreachable LLM doesn't turn into
+one timeout per layer. To measure the effect, run the resolver eval against
+the live catalog before and after: `make eval-resolver ARGS="--catalog-live"`.
 
 ---
 
@@ -532,6 +582,7 @@ Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
 | `GEO_MAP_OUTPUT_DIR` | `./maps` | Where generated maps / downloaded PNGs are saved |
 | `WEBUI_PORT` | `8000` | Port for the web UI |
 | `WEBUI_USER` / `WEBUI_PASSWORD` | _(none)_ | When **both** are set, every web UI route except `/healthz` requires HTTP Basic auth |
+| `GEO_OTEL_ENABLE` / `OTEL_EXPORTER_OTLP_ENDPOINT` | `false` / _(none)_ | OpenTelemetry traces + `gen_ai.*` metrics; on when either is set (OTLP over HTTP, e.g. `http://collector:4318`). Prompts are exported only with `ENABLE_SENSITIVE_DATA=true` |
 | `GEO_RESOLVER_STRUCTURED` | `true` | Constrain the chat resolver's reply with a JSON Schema (falls back automatically if the backend rejects it) |
 | `WEBUI_RATE_LIMIT` | `30` | Requests per minute per client IP on `/api/ask`, `/api/enrich`, `/api/upload` (`0` = off) |
 | `GEO_CATALOG_TTL` | `60` | Seconds the chat caches the WMS layer catalog (`0` = no cache); an upload refreshes it |
