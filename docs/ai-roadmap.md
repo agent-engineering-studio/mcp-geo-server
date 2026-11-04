@@ -8,6 +8,18 @@ ripetuti.
 
 Documento redatto il 2026-11-04. Stato del codice analizzato: commit `effbdba`.
 
+**Avanzamento** (aggiornato al 2026-11-04)
+
+| Fase | Stato | PR |
+|---|---|---|
+| 0 — debiti D1–D4, D7 | in review | #9 |
+| 1 — eval, output strutturato, guardrail CQL | in review | #11 |
+| 2 — `resolve.py`/`places.py`, metadata AI, OpenTelemetry | in review | #12 |
+| 3–6 | da fare | — |
+
+Nota: nessuna fase ha ancora una baseline misurata su un LLM reale; il primo
+passo dopo il merge è `make eval-resolver ARGS="--record runs/<modello>.json"`.
+
 ---
 
 ## 1. Sintesi
