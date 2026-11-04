@@ -8,6 +8,7 @@ import httpx
 import pytest
 
 from mcp_geo_server.catalog import build_catalog
+from mcp_geo_server.resolver import Tier
 
 PAI = "ispra:mosaicatura_ispra_2020_2021_aree_pericolosita_frana_pai"
 FRANE = "ispra:frane_poly_molise_opendata"
@@ -56,7 +57,7 @@ def ask(monkeypatch):
     monkeypatch.setattr(webui_app, "_FILTER_SPEC", None)
 
     async def call(reply, query="q"):
-        monkeypatch.setattr(webui_app, "_RESOLVER", FakeAgent(reply))
+        monkeypatch.setattr(webui_app, "_RESOLVER_TIERS", [Tier(FakeAgent(reply), "ollama")])
         transport = httpx.ASGITransport(app=webui_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             return await c.post("/api/ask", json={"query": query})
@@ -105,7 +106,7 @@ async def test_unparseable_reply_is_502(ask, monkeypatch):
             return _Result("no json")
 
     async def call():
-        monkeypatch.setattr(webui_app, "_RESOLVER", Broken())
+        monkeypatch.setattr(webui_app, "_RESOLVER_TIERS", [Tier(Broken(), "ollama")])
         transport = httpx.ASGITransport(app=webui_app.app)
         async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
             return await c.post("/api/ask", json={"query": "q"})
