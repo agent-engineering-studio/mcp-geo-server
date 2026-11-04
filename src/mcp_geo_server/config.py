@@ -140,7 +140,7 @@ def _load() -> Settings:
         ollama_cloud_host=(os.environ.get("OLLAMA_CLOUD_HOST") or "https://ollama.com").strip(),
         ollama_api_key=(os.environ.get("OLLAMA_API_KEY") or "").strip(),
         anthropic_api_key=(os.environ.get("ANTHROPIC_API_KEY") or "").strip(),
-        anthropic_model=(os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-4-6").strip(),
+        anthropic_model=(os.environ.get("ANTHROPIC_MODEL") or "claude-sonnet-5-5").strip(),
         # Empty = the OpenAI SDK's own default (api.openai.com). Include the
         # /v1 suffix: the SDK appends only the path, not the version segment.
         openai_base_url=(os.environ.get("OPENAI_BASE_URL") or "").strip().rstrip("/"),
@@ -149,7 +149,10 @@ def _load() -> Settings:
         openai_model=(os.environ.get("OPENAI_LLM_MODEL") or "").strip(),
         openai_api_key=(os.environ.get("OPENAI_API_KEY") or "").strip(),
         mcp_transport=(os.environ.get("GEO_MCP_TRANSPORT") or "stdio").strip().lower(),
-        mcp_host=(os.environ.get("GEO_MCP_HOST") or "0.0.0.0").strip(),
+        # Loopback by default: a local streamable-HTTP server must not be
+        # reachable from the LAN unless asked. Containers set 0.0.0.0 explicitly
+        # (docker-compose.yml), where an open bind is required.
+        mcp_host=(os.environ.get("GEO_MCP_HOST") or "127.0.0.1").strip(),
         mcp_port=_as_int(os.environ.get("GEO_MCP_PORT"), 9000),
         allow_destructive=_as_bool(os.environ.get("GEO_ALLOW_DESTRUCTIVE"), False),
     )

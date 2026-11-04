@@ -6,6 +6,16 @@ Context Protocol, e piano di migrazione/miglioramento.
 
 Documento redatto il 2026-07-30. Stato del codice analizzato: commit `b86e61f`.
 
+> **Aggiornamento 2026-11-04.** Il blocco architetturale di §1.1 e §4 è stato
+> risolto a monte: `agent-framework` **1.24** (30/10/2026) porta
+> `as_mcp_server()` sull'SDK `mcp` v2. Con `agent-framework>=1.24` e
+> `mcp>=2.2,<3` il server attuale risponde già con protocollo **2026-07-28**,
+> sia in-memory sia su streamable-HTTP (`tests/test_mcp_protocol.py`). Della
+> Fase 0 sono fatti: vincolo delle dipendenze (con tetto `<3` invece di `<2`) e
+> bind di default su `127.0.0.1`. Il disaccoppiamento proposto in §4 resta
+> valido per i suoi benefici (tool tipizzati, `annotations`, MRTR, nessun LLM
+> server-side), ma non è più obbligato dalla spec.
+
 ---
 
 ## 1. Sintesi esecutiva

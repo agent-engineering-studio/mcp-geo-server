@@ -41,11 +41,11 @@ USER app
 
 EXPOSE 8000
 
-# Health is checked against the static index ("/") so it does not require a
-# reachable GeoServer just to report the container as healthy.
+# Health is checked against /healthz: it needs no reachable GeoServer and is
+# exempt from the optional Basic auth (WEBUI_USER / WEBUI_PASSWORD).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import os,urllib.request; \
-url='http://127.0.0.1:'+os.environ.get('WEBUI_PORT','8000')+'/'; \
+url='http://127.0.0.1:'+os.environ.get('WEBUI_PORT','8000')+'/healthz'; \
 urllib.request.urlopen(url, timeout=4)" || exit 1
 
 # Default: serve the FastAPI test UI. Override the command for the MCP server.
