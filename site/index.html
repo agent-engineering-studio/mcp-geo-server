@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>mcp-geo-server</title>
+  <meta name="description" content="An intelligent MCP server that drives GeoServer in natural language, with a chat + map web UI and a Dockerised, domain-agnostic GIS stack.">
+  <meta property="og:title" content="mcp-geo-server">
+  <meta property="og:description" content="Drive GeoServer in natural language over MCP — chat, map, PostGIS, thematic styles.">
+  <meta property="og:image" content="assets/screenshot-chat-map.jpg">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='10' fill='%232f7d5b'/%3E%3Cpath d='M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20' stroke='white' stroke-width='1.6' fill='none'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>
+      mcp-geo-server
+    </a>
+    <nav class="links">
+      <a class="opt" href="#features">Features</a>
+      <a class="opt" href="#architecture">Architecture</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#ai-roadmap">AI roadmap</a>
+      <a href="https://github.com/agent-engineering-studio/mcp-geo-server">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div class="eyebrow">Model Context Protocol · GeoServer · PostGIS</div>
+    <h1>Ask your GIS stack in plain language.</h1>
+    <p class="lead">
+      An intelligent MCP server that drives a GeoServer instance through an LLM agent,
+      plus a chat + map web UI and a fully Dockerised, domain-agnostic stack.
+      Ask <em>“show me the linear landslides in Molise”</em> and the matching layers render on the map.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#quickstart">Get started</a>
+      <a class="btn" href="https://github.com/agent-engineering-studio/mcp-geo-server">View on GitHub</a>
+      <a class="btn" href="#ai-roadmap">AI roadmap</a>
+    </div>
+
+    <figure class="shot">
+      <img src="assets/screenshot-chat-map.jpg" alt="Chat on the left resolves a natural-language request to GeoServer layers; the map on the right shows landslide areas of the Marche region with a thematic legend." width="1800" height="651">
+      <figcaption>The chat resolves a request to GeoServer layers and renders them with a thematic legend — here, the landslide areas of the Marche region, classified by movement type.</figcaption>
+    </figure>
+  </div>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>What it does</h2>
+      <p class="sub">One async core — the GeoServer client, the <code>geo_*</code> tools and the shared ingest / catalog / styling modules — serves the MCP agent, the web UI and the data bootstrap.</p>
+      <div class="grid">
+        <div class="card"><h3>Natural-language GeoServer agent</h3><p>A Microsoft Agent Framework agent with 33 <code>geo_*</code> tools, served over MCP (stdio or streamable HTTP).</p></div>
+        <div class="card"><h3>Chat-first map UI</h3><p>Requests resolve to published layers, rendered on Leaflet with live WMS legend, admin-area clipping and per-layer CQL.</p></div>
+        <div class="card"><h3>Domain-agnostic catalog</h3><p>Layer resolution reads names, titles, abstracts and keywords from WMS capabilities. There’s no vocabulary hardcoded in the code.</p></div>
+        <div class="card"><h3>Idempotent data bootstrap</h3><p>Drop shapefiles and GeoTIFFs in <code>./data</code>: they land in PostGIS or as zero-copy coverages and are published automatically.</p></div>
+        <div class="card"><h3>Config-driven styles</h3><p>Thematic SLDs (categorical, line, point, raster ramps) generated from a YAML file and assigned by layer-name rules.</p></div>
+        <div class="card"><h3>Terrain enrichment</h3><p>Elevation, slope, aspect and curvature for any vector layer, sampled from a DTM on demand.</p></div>
+        <div class="card"><h3>Pluggable LLM</h3><p>Host Ollama, Ollama Cloud, Anthropic Claude, or any OpenAI-compatible endpoint (LiteLLM, vLLM, llama-server).</p></div>
+        <div class="card"><h3>Safe by default</h3><p>A function middleware blocks destructive tools unless <code>GEO_ALLOW_DESTRUCTIVE=true</code>.</p></div>
+        <div class="card"><h3>Native multi-arch images</h3><p>amd64 and arm64 images published to GHCR by CI, with no QEMU emulation on Apple Silicon.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="architecture">
+    <div class="wrap">
+      <h2>Architecture</h2>
+      <p class="sub">The LLM is reached lazily over the network and never gates startup. The browser only talks to the web UI, which proxies WMS.</p>
+      <div class="arch">
+        <svg viewBox="0 0 760 300" role="img" aria-label="Architecture: MCP clients call the MCP server agent; the browser calls the web UI resolver; both use the shared geo core, which talks to GeoServer, backed by PostGIS and the data directory. Both AI components call the LLM provider.">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z"/></marker>
+          </defs>
+          <!-- clients -->
+          <rect class="box" x="20" y="30" width="150" height="54" rx="8"/>
+          <text class="lbl" x="95" y="54" text-anchor="middle">MCP client</text>
+          <text class="sm" x="95" y="72" text-anchor="middle">Claude Desktop, IDEs…</text>
+          <rect class="box" x="20" y="180" width="150" height="54" rx="8"/>
+          <text class="lbl" x="95" y="204" text-anchor="middle">Browser</text>
+          <text class="sm" x="95" y="222" text-anchor="middle">chat + Leaflet map</text>
+          <!-- AI layer -->
+          <rect class="box ai" x="220" y="30" width="170" height="54" rx="8"/>
+          <text class="lbl" x="305" y="54" text-anchor="middle">MCP server :9000</text>
+          <text class="sm" x="305" y="72" text-anchor="middle">agent + DestructiveGuard</text>
+          <rect class="box ai" x="220" y="180" width="170" height="54" rx="8"/>
+          <text class="lbl" x="305" y="204" text-anchor="middle">Web UI :8000</text>
+          <text class="sm" x="305" y="222" text-anchor="middle">NL resolver · WMS proxy</text>
+          <!-- LLM -->
+          <rect class="box ai" x="220" y="110" width="170" height="44" rx="8"/>
+          <text class="lbl" x="305" y="137" text-anchor="middle">LLM provider</text>
+          <!-- core -->
+          <rect class="box" x="440" y="105" width="140" height="54" rx="8"/>
+          <text class="lbl" x="510" y="129" text-anchor="middle">geo core</text>
+          <text class="sm" x="510" y="147" text-anchor="middle">client · tools · catalog</text>
+          <!-- backends -->
+          <rect class="box" x="620" y="40" width="120" height="44" rx="8"/>
+          <text class="lbl" x="680" y="67" text-anchor="middle">GeoServer</text>
+          <rect class="box" x="620" y="130" width="120" height="44" rx="8"/>
+          <text class="lbl" x="680" y="157" text-anchor="middle">PostGIS</text>
+          <rect class="box" x="620" y="220" width="120" height="44" rx="8"/>
+          <text class="lbl" x="680" y="240" text-anchor="middle">./data</text>
+          <text class="sm" x="680" y="255" text-anchor="middle">shp · GeoTIFF</text>
+          <!-- edges -->
+          <path class="ln" d="M170 57H216"/>
+          <path class="ln" d="M170 207H216"/>
+          <path class="ln" d="M305 84V106"/>
+          <path class="ln" d="M305 180V158"/>
+          <path class="ln" d="M390 57C420 57 420 120 436 124"/>
+          <path class="ln" d="M390 207C420 207 420 145 436 140"/>
+          <path class="ln" d="M580 122C600 110 600 70 616 64"/>
+          <path class="ln" d="M680 84V126"/>
+          <path class="ln" d="M680 174V216"/>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <section id="quickstart">
+    <div class="wrap">
+      <h2>Quickstart</h2>
+      <p class="sub">Requires Docker + Compose and an LLM: host Ollama by default, or Ollama Cloud, Anthropic or an OpenAI-compatible gateway.</p>
+<pre><code>git clone https://github.com/agent-engineering-studio/mcp-geo-server
+cd mcp-geo-server
+ollama serve &amp;        # host Ollama (default provider)
+make ollama-pull      # pull OLLAMA_LLM_MODEL onto the host
+make build            # app images + GeoServer/PostGIS for your arch
+make up               # start the stack</code></pre>
+      <div class="table-wrap" style="margin-top:20px">
+        <table>
+          <thead><tr><th>Service</th><th>Endpoint</th><th>Role</th></tr></thead>
+          <tbody>
+            <tr><td><code>webui</code></td><td><code>http://localhost:8000</code></td><td>Chat + map UI, WMS proxy, shapefile upload</td></tr>
+            <tr><td><code>mcp</code></td><td><code>http://localhost:9000/mcp</code></td><td>Intelligent MCP server (streamable HTTP)</td></tr>
+            <tr><td><code>geoserver</code></td><td><code>http://localhost:8080/geoserver</code></td><td>GeoServer 2.28</td></tr>
+            <tr><td><code>postgis</code></td><td><code>localhost:5432</code></td><td>PostGIS 16-3.4</td></tr>
+            <tr><td><code>geo-init</code></td><td>one-shot</td><td>Loads <code>./data</code> and applies styles</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="sub" style="margin-top:28px">Call the agent from any MCP client:</p>
+<pre><code>from mcp.client.streamable_http import streamablehttp_client
+from mcp import ClientSession
+
+async with streamablehttp_client("http://localhost:9000/mcp") as (r, w, _):
+    async with ClientSession(r, w) as s:
+        await s.initialize()
+        res = await s.call_tool("geoserver-agent",
+                                {"task": "How many features are in topp:states?"})
+        print(res.content[0].text)</code></pre>
+    </div>
+  </section>
+
+  <section id="ai-roadmap">
+    <div class="wrap">
+      <h2>AI roadmap</h2>
+      <p class="sub">
+        Where the AI layer goes next. The full analysis, with file references, is in
+        <a href="https://github.com/agent-engineering-studio/mcp-geo-server/blob/main/docs/ai-roadmap.md">docs/ai-roadmap.md</a>;
+        the protocol migration is covered separately in the
+        <a href="https://github.com/agent-engineering-studio/mcp-geo-server/blob/main/docs/mcp-2026-07-28-upgrade-plan.md">MCP 2026-07-28 upgrade plan</a>.
+      </p>
+
+      <h3 style="margin:8px 0 14px">Making the current AI better</h3>
+      <div class="grid">
+        <div class="card star"><span class="tag">First</span><h3>NL → layer evaluation</h3><p>A golden set of Italian and English requests scored on layer precision and recall, CQL match, invalid-JSON rate and latency. It’s how we compare models and prompts on evidence.</p></div>
+        <div class="card"><span class="tag">Reliability</span><h3>Structured outputs</h3><p>Schema-constrained responses, with layer names as an enum, replace brace-scanning JSON extraction. Hallucinated layers can’t be produced, and parse failures stop surfacing as HTTP 502.</p></div>
+        <div class="card"><span class="tag">Scale</span><h3>Semantic catalog retrieval</h3><p>Layer embeddings in pgvector, inside the PostGIS the stack already runs. Only the top-k candidates reach the prompt, so its size stays constant as the catalog grows.</p></div>
+        <div class="card"><span class="tag">Safety</span><h3>CQL guardrails</h3><p>Parse LLM-generated filters to an AST and whitelist attributes and values against the selected layer before they reach WMS.</p></div>
+        <div class="card"><span class="tag">Cost</span><h3>Prompt caching &amp; model routing</h3><p>Use cached static prefixes and a small local model first, then escalate to a larger one on low confidence or invalid output.</p></div>
+        <div class="card"><span class="tag">Ops</span><h3>GenAI observability</h3><p>OpenTelemetry spans with tokens, latency, model and validation outcome, exported to a collector in the compose stack.</p></div>
+      </div>
+
+      <h3 style="margin:36px 0 14px">New AI features</h3>
+      <div class="grid">
+        <div class="card star"><span class="tag new">Top pick</span><h3>AI metadata at ingest</h3><p>When a layer is published, an LLM writes its title, abstract, bilingual keywords and column descriptions from the schema and sample values. That feeds the resolver directly.</p></div>
+        <div class="card"><span class="tag new">New</span><h3>Styles from natural language</h3><p><em>“Colour landslides by movement type, red-orange.”</em> The model emits a validated <code>styles.yml</code> entry instead of raw SLD.</p></div>
+        <div class="card"><span class="tag new">New</span><h3>Multi-turn map refinement</h3><p><em>“Only high hazard” → “add the DTM” → “drop rockfalls”.</em> Each turn sends a delta on the current map state, with the state kept client-side.</p></div>
+        <div class="card"><span class="tag new">New</span><h3>Analytical questions</h3><p>Answer <em>how many</em>, <em>which</em> and <em>where most</em>: WFS aggregates first, then sandboxed read-only text-to-SQL on PostGIS for spatial questions.</p></div>
+        <div class="card"><span class="tag new">New</span><h3>Automated area reports</h3><p>A workflow combines statistics, DTM metrics, the map image and the legend into a written risk sheet for a municipality or area.</p></div>
+        <div class="card"><span class="tag new">New</span><h3>High-level MCP tools</h3><p><code>geo_search_layers</code>, <code>geo_resolve_request</code>, <code>geo_admin_scope</code>, <code>geo_describe_layer</code>, plus MCP prompts and the catalog as resources.</p></div>
+        <div class="card"><span class="tag new">New</span><h3>Visual map QA</h3><p>A vision model checks the rendered map for empty results, opaque rasters covering vectors, or unreadable palettes.</p></div>
+        <div class="card"><span class="tag new">New</span><h3>Assisted data quality</h3><p>Suggests a missing SRS from the coordinates, detects encoding issues and flags invalid geometries in an ingest report.</p></div>
+        <div class="card"><span class="tag new">Exploratory</span><h3>Landslide susceptibility ML</h3><p>The landslide inventory plus DTM derivatives (already computed) train a model whose output is published as a susceptibility raster.</p></div>
+      </div>
+
+      <h3 style="margin:36px 0 14px">Phases</h3>
+      <ol class="phases">
+        <li class="phase"><span class="num">0</span><div><h3>Close the blockers</h3><p>Pin <code>mcp&lt;2</code>, bind MCP to localhost by default, add auth and rate limiting to the web UI, update the default Claude model, cache the catalog.</p></div><span class="est">1–2 days</span></li>
+        <li class="phase"><span class="num">1</span><div><h3>Measure, then constrain</h3><p>NL → layer evaluation, structured outputs, CQL guardrails.</p></div><span class="est">4–6 days</span></li>
+        <li class="phase"><span class="num">2</span><div><h3>Extract the resolver, feed it metadata</h3><p>Move the resolution logic into the core package, make admin levels config-driven, generate AI metadata at ingest, add OTel.</p></div><span class="est">1 week</span></li>
+        <li class="phase"><span class="num">3</span><div><h3>Scale the catalog</h3><p>pgvector retrieval, prompt caching, model router with fallback.</p></div><span class="est">1 week</span></li>
+        <li class="phase"><span class="num">4</span><div><h3>Conversational map</h3><p>Multi-turn refinement, model-based intent and places, styles from natural language.</p></div><span class="est">1–2 weeks</span></li>
+        <li class="phase"><span class="num">5</span><div><h3>High-level MCP tools</h3><p>Exposed alongside the MCP v2 migration from the upgrade plan.</p></div><span class="est">1 week</span></li>
+        <li class="phase"><span class="num">6</span><div><h3>Analysis &amp; reports</h3><p>WFS aggregates, then text-to-SQL, area reports, visual QA.</p></div><span class="est">2–3 weeks</span></li>
+      </ol>
+      <p class="note">Rule of thumb: from phase 3 on, a feature only ships with an evaluation case that measures its effect.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>mcp-geo-server · MIT License · Agent Engineering Studio</span>
+    <span><a href="https://github.com/agent-engineering-studio/mcp-geo-server">Source</a> · <a href="https://github.com/agent-engineering-studio/mcp-geo-server/issues">Issues</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
