@@ -15,7 +15,8 @@ Documento redatto il 2026-11-04. Stato del codice analizzato: commit `effbdba`.
 | 0 — debiti D1–D4, D7 | in review | #9 |
 | 1 — eval, output strutturato, guardrail CQL | in review | #11 |
 | 2 — `resolve.py`/`places.py`, metadata AI, OpenTelemetry | in review | #12 |
-| 3–6 | da fare | — |
+| 3 — retrieval per famiglie, router di modelli, prompt caching | in review | #14 |
+| 4–6 | da fare | — |
 
 Nota: nessuna fase ha ancora una baseline misurata su un LLM reale; il primo
 passo dopo il merge è `make eval-resolver ARGS="--record runs/<modello>.json"`.
@@ -106,6 +107,14 @@ Schema), Ollama (`format` con JSON Schema). Agent Framework espone
 - tenere `validate_selection()` come seconda linea di difesa.
 
 ### 3.3 Retrieval semantico del catalogo con pgvector
+
+> **Rivisto in implementazione (#14).** Misurato sul golden set, un top-k
+> lessicale perde un layer atteso in 8 richieste su 29: i layer con nomi opachi
+> (`com01012023_g`) non condividono parole con la richiesta. La ridondanza vera
+> è strutturale (105 dei 113 layer sono famiglie × regioni), quindi il retrieval
+> riduce solo le *famiglie* ai membri nominati e tiene sempre i layer singoli:
+> 113 → 13 layer quando c'è una regione, nessun layer atteso perso. pgvector e
+> gli embedding restano un possibile seguito per sinonimi e traduzioni.
 
 Il catalogo intero nel prompt è il collo di bottiglia di scala. Proposta:
 
