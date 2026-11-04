@@ -21,10 +21,10 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from mcp_geo_server.agent import _build_chat_client
 from mcp_geo_server import cql as _cql
 from mcp_geo_server import places as _places
 from mcp_geo_server import resolver as _resolver
+from mcp_geo_server import retrieval as _retrieval
 from mcp_geo_server.catalog import build_catalog, parse_wms_capabilities
 from mcp_geo_server.styling import load_config as _load_style_config
 from mcp_geo_server.client import GeoServerError, get_client
@@ -76,7 +76,11 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(BasicAuthMiddleware)
 
 # Lazily-built LLM resolver (no GeoServer tools — it only maps NL -> layer names).
-_RESOLVER = None
+# Resolver tiers (primary model + optional fallback) and the catalog
+# retriever, built lazily on the first request.
+_RESOLVER_TIERS: list | None = None
+_RETRIEVER = _retrieval.retriever_from_env()
+_MIN_CONFIDENCE = _resolver.min_confidence_from_env()
 _RESOLVER_INSTRUCTIONS = _resolver.INSTRUCTIONS
 # Schema-constrained replies (GEO_RESOLVER_STRUCTURED=false to turn off, e.g.
 # for a backend that rejects JSON-schema output; there is also an automatic
@@ -85,13 +89,11 @@ _RESOLVER_STRUCTURED = (os.environ.get("GEO_RESOLVER_STRUCTURED") or "true"
                         ).strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _get_resolver():
-    global _RESOLVER
-    if _RESOLVER is None:
-        client = _build_chat_client(get_settings())
-        _RESOLVER = client.as_agent(name="layer-resolver",
-                                    instructions=_RESOLVER_INSTRUCTIONS, tools=[])
-    return _RESOLVER
+def _get_resolver_tiers() -> list:
+    global _RESOLVER_TIERS
+    if _RESOLVER_TIERS is None:
+        _RESOLVER_TIERS = _resolver.tiers_from_settings(_RESOLVER_INSTRUCTIONS)
+    return _RESOLVER_TIERS
 
 
 async def _guard(coro: Any) -> Any:
@@ -581,10 +583,11 @@ async def ask(body: AskIn) -> dict:
     catalog = await _load_catalog()
     spec = _filter_spec()
     try:
-        selection = await _resolver.resolve(
-            _get_resolver(), query, catalog, spec,
-            provider=get_settings().llm_provider,
-            structured=_RESOLVER_STRUCTURED, guard=False)
+        selection = await _resolver.resolve_routed(
+            _get_resolver_tiers(), query, catalog, spec,
+            min_confidence=_MIN_CONFIDENCE, structured=_RESOLVER_STRUCTURED,
+            guard=False, retriever=_RETRIEVER,
+            prompt_cache=_resolver.prompt_cache_from_env())
     except ValueError as exc:
         raise HTTPException(status_code=502,
                             detail=f"could not parse model reply: {exc}") from exc

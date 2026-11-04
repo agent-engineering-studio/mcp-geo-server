@@ -172,6 +172,32 @@ def response_format_for(provider: str, schema: dict) -> dict:
     return schema
 
 
+def cached_prompt_parts(catalog: list[LayerMeta], hints: str, query: str, *,
+                        catalog_is_static: bool) -> tuple[dict, str]:
+    """Anthropic prompt caching: (cacheable system block, per-request message).
+
+    The static part — the full catalog (when retrieval did not narrow it, so it
+    is identical across requests) and the filter hints — goes in a system block
+    marked ``cache_control``; Agent Framework appends it after the agent's
+    instructions, so the cached prefix is instructions + catalog + hints. The
+    request (and a narrowed, per-request catalog) goes in the user message.
+    """
+    static = [catalog_prompt(catalog)] if catalog_is_static else []
+    if hints:
+        static.append(hints)
+    block = {"type": "text", "text": "\n\n".join(static) or "(no catalog context)",
+             "cache_control": {"type": "ephemeral"}}
+    dynamic = [] if catalog_is_static else [catalog_prompt(catalog)]
+    dynamic.append(f"Request: {query}\n\nJSON:")
+    return block, "\n\n".join(dynamic)
+
+
+def prompt_cache_from_env() -> bool:
+    import os
+    return (os.environ.get("GEO_PROMPT_CACHE") or "false").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
 def build_prompt(catalog: list[LayerMeta], hints: str, query: str) -> str:
     """Static-first ordering: catalog and hints change rarely, the query always."""
     parts = [catalog_prompt(catalog)]
@@ -220,7 +246,8 @@ def guard_cql(selection: dict, spec: FilterSpec,
 
 
 async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: FilterSpec,
-                  *, provider: str, structured: bool = True, guard: bool = True) -> dict:
+                  *, provider: str, structured: bool = True, guard: bool = True,
+                  retriever: Any | None = None, prompt_cache: bool = False) -> dict:
     """Run the resolver agent on ``query`` and return a validated selection.
 
     Result keys: ``layers``, ``cql_filter``, ``explanation``, ``confidence``,
@@ -230,22 +257,43 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
 
     ``guard=False`` skips :func:`guard_cql`, for callers that know the layers'
     real columns and run it themselves (the web UI does).
+
+    ``retriever`` (:class:`mcp_geo_server.retrieval.Retriever`) narrows the
+    layers shown to the model; the reply is still validated against the FULL
+    catalog. The result then carries ``candidates`` (how many were shown).
+
+    ``prompt_cache`` (Anthropic only) sends the static part of the prompt as a
+    cached system block (:func:`cached_prompt_parts`).
     """
     with telemetry.span("geo.resolve", **{
             "gen_ai.provider.name": provider, "geo.catalog.size": len(catalog),
             "geo.query.length": len(query), "geo.structured.requested": structured,
     }) as sp:
-        prompt = build_prompt(catalog, spec.hints(), query)
+        shown = catalog
+        retrieval_reason = None
+        narrowed = False
+        if retriever is not None:
+            r = retriever.retrieve(query, catalog)
+            shown, retrieval_reason, narrowed = r.candidates, r.reason, r.applied
+        prompt = build_prompt(shown, spec.hints(), query)
+        first_prompt, first_opts = prompt, {}
+        use_cache = prompt_cache and provider == "anthropic"
+        if use_cache:
+            block, first_prompt = cached_prompt_parts(shown, spec.hints(), query,
+                                                      catalog_is_static=not narrowed)
+            first_opts["instructions"] = [block]
+        if structured:
+            first_opts["response_format"] = response_format_for(provider,
+                                                                selection_schema(shown))
         used_structured = False
         result = None
-        if structured:
+        if first_opts:
             try:
-                fmt = response_format_for(provider, selection_schema(catalog))
-                result = await agent.run(prompt, options={"response_format": fmt})
-                used_structured = True
-            except Exception as exc:  # noqa: BLE001 — backend may not support schemas
-                logger.warning("structured resolver call failed (%s); retrying "
-                               "without a schema", exc)
+                result = await agent.run(first_prompt, options=first_opts)
+                used_structured = structured
+            except Exception as exc:  # noqa: BLE001 — schema/cache may be unsupported
+                logger.warning("resolver call with %s failed (%s); retrying plain",
+                               "+".join(sorted(first_opts)), exc)
         if result is None:
             result = await agent.run(prompt)
 
@@ -257,6 +305,7 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
         selection["confidence"] = _confidence(reply)
         selection["structured"] = used_structured
         selection["raw"] = text
+        selection["candidates"] = len(shown)
         selection.setdefault("cql_rejected", None)
         if guard:
             guard_cql(selection, spec)
@@ -267,5 +316,108 @@ async def resolve(agent: Any, query: str, catalog: list[LayerMeta], spec: Filter
             "geo.cql.present": bool(reply.get("cql_filter")),
             "geo.cql.rejected": selection["cql_rejected"] is not None,
             "geo.confidence": selection["confidence"],
+            "geo.retrieval.candidates": len(shown),
+            "geo.retrieval.reason": retrieval_reason,
+            "geo.prompt_cache": use_cache,
         })
         return selection
+
+
+# ---- model routing ------------------------------------------------------------------
+@dataclass
+class Tier:
+    """One model the resolver can use: an agent plus its provider/model label."""
+
+    agent: Any
+    provider: str
+    model: str = ""
+
+    @property
+    def label(self) -> str:
+        return f"{self.provider}:{self.model}" if self.model else self.provider
+
+
+DEFAULT_MIN_CONFIDENCE = 0.5
+
+
+def escalation_reason(selection: dict, min_confidence: float) -> str | None:
+    """Why a reply is not good enough to keep, or None.
+
+    Only a LOW self-reported confidence escalates: an empty selection with high
+    confidence is a legitimate "nothing in the catalog fits".
+    """
+    c = selection.get("confidence")
+    if c is not None and c < min_confidence:
+        return f"confidence {c:.2f} < {min_confidence:.2f}"
+    return None
+
+
+async def resolve_routed(tiers: list[Tier], query: str, catalog: list[LayerMeta],
+                         spec: FilterSpec, *, min_confidence: float = DEFAULT_MIN_CONFIDENCE,
+                         **kwargs) -> dict:
+    """:func:`resolve` on the first tier; move to the next on failure or doubt.
+
+    A tier is skipped when its call raises (unreachable model, unparseable
+    reply) or :func:`escalation_reason` objects. The last tier's answer is
+    kept whatever its confidence. Adds ``model`` (tier label), ``escalated``
+    and ``escalations`` (list of ``{model, reason}``) to the selection.
+    """
+    if not tiers:
+        raise ValueError("no resolver tiers configured")
+    escalations: list[dict] = []
+    for i, tier in enumerate(tiers):
+        last = i == len(tiers) - 1
+        try:
+            sel = await resolve(tier.agent, query, catalog, spec,
+                                provider=tier.provider, **kwargs)
+        except Exception as exc:  # noqa: BLE001 — try the next model
+            if last:
+                raise
+            escalations.append({"model": tier.label, "reason": f"{type(exc).__name__}: {exc}"})
+            logger.warning("resolver tier %s failed (%s); escalating", tier.label, exc)
+            continue
+        reason = None if last else escalation_reason(sel, min_confidence)
+        if reason is None:
+            sel.update(model=tier.label, escalated=bool(escalations),
+                       escalations=escalations)
+            if escalations:
+                telemetry.event("geo.resolve.escalated", **{
+                    "geo.model": tier.label,
+                    "geo.escalation.reasons": "; ".join(e["reason"] for e in escalations)})
+            return sel
+        escalations.append({"model": tier.label, "reason": reason})
+        logger.info("resolver tier %s: %s; escalating", tier.label, reason)
+    raise AssertionError("unreachable")
+
+
+def tiers_from_settings(instructions: str = INSTRUCTIONS) -> list[Tier]:
+    """Primary tier from the configured provider, plus an optional fallback.
+
+    ``GEO_LLM_FALLBACK_PROVIDER`` (and optionally ``GEO_LLM_FALLBACK_MODEL``)
+    add a second tier, e.g. a local Ollama model first and Claude when it is
+    unsure.
+    """
+    import os
+
+    from .agent import _build_chat_client, model_name, settings_for
+    from .config import get_settings
+
+    def tier(settings) -> Tier:
+        client = _build_chat_client(settings)
+        agent = client.as_agent(name="layer-resolver", instructions=instructions, tools=[])
+        return Tier(agent, settings.llm_provider, model_name(settings))
+
+    base = get_settings()
+    tiers = [tier(base)]
+    fb = (os.environ.get("GEO_LLM_FALLBACK_PROVIDER") or "").strip().lower()
+    if fb:
+        tiers.append(tier(settings_for(base, fb,
+                                       (os.environ.get("GEO_LLM_FALLBACK_MODEL") or "").strip()
+                                       or None)))
+    return tiers
+
+
+def min_confidence_from_env() -> float:
+    import os
+    raw = (os.environ.get("GEO_LLM_CONFIDENCE_MIN") or "").strip()
+    return float(raw) if raw else DEFAULT_MIN_CONFIDENCE

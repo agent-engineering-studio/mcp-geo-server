@@ -343,6 +343,29 @@ sequenceDiagram
    the map shows the unfiltered data, and the response says why
    (`cql_rejected`).
 
+5. **Only the relevant part of the catalog is shown** (`mcp_geo_server/retrieval.py`).
+   Catalogs are mostly *families* of layers that differ by one part of the
+   name: the same dataset per region, year or tile. The ISPRA catalog is
+   5 families × 21 regions, which is 105 of its 113 layers. Families are
+   found from the names alone. When the request names a variant ("frane in
+   Toscana"), each family is cut down to the matching members. Layers outside
+   any family, often with opaque names like `com01012023_g`, are always kept.
+   If no variant is named, the whole catalog is sent. On the golden set the
+   prompt drops from 113 to 13 layers whenever a region is named, and no
+   expected layer is ever cut. A plain top-k text ranking lost one in 8 of
+   29 cases. `GEO_RETRIEVAL=false` turns it off.
+6. **A second model when the first is unsure.** With `GEO_LLM_FALLBACK_PROVIDER`
+   (and optionally `GEO_LLM_FALLBACK_MODEL`), a reply with a confidence below
+   `GEO_LLM_CONFIDENCE_MIN` (default 0.5), or a failed call, is retried on the
+   fallback model. For example, a local Ollama model can go first and Claude
+   only when needed. The response reports `model`, `escalated` and why.
+7. **Prompt caching (Anthropic, opt-in).** `GEO_PROMPT_CACHE=true` sends the
+   static part of the prompt (the full catalog and the filter hints) as a
+   system block marked `cache_control`, so repeated requests reuse it. This
+   applies when retrieval didn't narrow the catalog. The request shape is
+   checked by a test with the real client; check the cache hit rate on your
+   account before relying on it.
+
 The server then prepares the result for any map client:
 
 - **Draw order.** Layers come back bottom to top: rasters under vectors, the
@@ -583,6 +606,10 @@ Override with `POSTGIS_IMAGE` / `GEOSERVER_IMAGE` / `GEOSERVER_DATA_DIR`. Plain
 | `WEBUI_PORT` | `8000` | Port for the web UI |
 | `WEBUI_USER` / `WEBUI_PASSWORD` | _(none)_ | When **both** are set, every web UI route except `/healthz` requires HTTP Basic auth |
 | `GEO_OTEL_ENABLE` / `OTEL_EXPORTER_OTLP_ENDPOINT` | `false` / _(none)_ | OpenTelemetry traces + `gen_ai.*` metrics; on when either is set (OTLP over HTTP, e.g. `http://collector:4318`). Prompts are exported only with `ENABLE_SENSITIVE_DATA=true` |
+| `GEO_RETRIEVAL` / `GEO_RETRIEVAL_MIN_CATALOG` | `true` / `40` | Show the resolver only the matching members of layer families; catalogs this small or smaller are sent whole |
+| `GEO_LLM_FALLBACK_PROVIDER` / `GEO_LLM_FALLBACK_MODEL` | _(none)_ | Second resolver model, used when the first fails or is unsure |
+| `GEO_LLM_CONFIDENCE_MIN` | `0.5` | Below this self-reported confidence the resolver escalates to the fallback model |
+| `GEO_PROMPT_CACHE` | `false` | Anthropic prompt caching of the static prompt part (catalog + filter hints) |
 | `GEO_RESOLVER_STRUCTURED` | `true` | Constrain the chat resolver's reply with a JSON Schema (falls back automatically if the backend rejects it) |
 | `WEBUI_RATE_LIMIT` | `30` | Requests per minute per client IP on `/api/ask`, `/api/enrich`, `/api/upload` (`0` = off) |
 | `GEO_CATALOG_TTL` | `60` | Seconds the chat caches the WMS layer catalog (`0` = no cache); an upload refreshes it |
@@ -748,6 +775,11 @@ make eval-resolver ARGS="--record runs/qwen.json"    # …and save the raw repli
 make eval-resolver ARGS="--replay runs/qwen.json"    # re-score offline, no LLM call
 make eval-resolver ARGS="--only cql --min-exact 0.9" # a subset, with a gate
 ```
+
+The report also counts `retrieval_misses` (expected layers that retrieval
+hid from the model), `mean_candidates` (layers shown per request) and
+`escalations` to the fallback model. `--no-retrieval` sends the whole catalog,
+for a side-by-side comparison.
 
 Replay lets you re-score an old recording after changing the guard. It also
 lets you compare providers and models side by side. CI scores a synthetic

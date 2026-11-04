@@ -38,7 +38,13 @@ import yaml
 
 from . import cql as cqlmod
 from .catalog import LayerMeta, build_catalog
-from .resolver import FilterSpec, filter_spec, resolve
+from .resolver import (
+    DEFAULT_MIN_CONFIDENCE,
+    FilterSpec,
+    Tier,
+    filter_spec,
+    resolve_routed,
+)
 
 EVAL_DIR = Path(__file__).resolve().parents[2] / "tests" / "evals" / "resolver"
 
@@ -139,6 +145,10 @@ class Score:
     got_layers: list[str]
     got_cql: str | None
     cql_rejected: str | None = None   # guard's reason, when it dropped the filter
+    candidates: int | None = None     # layers shown to the model
+    model: str | None = None          # tier that answered
+    escalated: bool = False
+    retrieval_miss: list[str] = field(default_factory=list)  # expected, not shown
 
     @property
     def passed(self) -> bool:
@@ -185,6 +195,10 @@ def summarize(scores: list[Score]) -> dict:
                          if cql_scored else None),
         "error_rate": round(sum(s.error is not None for s in scores) / n, 3),
         "cql_rejected": sum(s.cql_rejected is not None for s in scores),
+        "retrieval_misses": sum(bool(s.retrieval_miss) for s in scores),
+        "escalations": sum(s.escalated for s in scores),
+        "mean_candidates": (round(statistics.mean(c), 1)
+                            if (c := [s.candidates for s in scores if s.candidates]) else None),
         "structured_fallbacks": sum(s.structured is False for s in struct),
         "latency_p50_s": round(statistics.median(lat), 2) if lat else None,
         "latency_p95_s": (round(lat[min(len(lat) - 1, int(0.95 * len(lat)))], 2)
@@ -212,36 +226,31 @@ class ReplayAgent:
 
 
 async def run_cases(cases: list[Case], catalog: list[LayerMeta], spec: FilterSpec,
-                    agent: Any, *, provider: str, structured: bool = True
+                    tiers: list[Tier], *, structured: bool = True,
+                    retriever: Any | None = None,
+                    min_confidence: float = DEFAULT_MIN_CONFIDENCE,
                     ) -> tuple[list[Score], dict[str, str]]:
     scores, raw = [], {}
     for case in cases:
         t0 = time.perf_counter()
         try:
-            sel = await resolve(agent, case.query, catalog, spec,
-                                provider=provider, structured=structured)
+            sel = await resolve_routed(tiers, case.query, catalog, spec,
+                                       min_confidence=min_confidence,
+                                       structured=structured, retriever=retriever)
             raw[case.query] = sel.get("raw", "")
-            scores.append(score_case(case, sel, latency_s=time.perf_counter() - t0))
+            sc = score_case(case, sel, latency_s=time.perf_counter() - t0)
+            sc.candidates = sel.get("candidates")
+            sc.model, sc.escalated = sel.get("model"), bool(sel.get("escalated"))
+            if retriever is not None:
+                shown = {m.qualified for m in retriever.retrieve(case.query, catalog).candidates}
+                sc.retrieval_miss = sorted(set(case.layers) - shown)
+            scores.append(sc)
         except Exception as exc:  # noqa: BLE001 — a failure is a scored outcome
             scores.append(score_case(case, None, error=f"{type(exc).__name__}: {exc}",
                                      latency_s=time.perf_counter() - t0))
     return scores, raw
 
 
-def _live_agent():
-    from .agent import _build_chat_client
-    from .config import get_settings
-    from .resolver import INSTRUCTIONS
-
-    settings = get_settings()
-    client = _build_chat_client(settings)
-    return (client.as_agent(name="layer-resolver", instructions=INSTRUCTIONS, tools=[]),
-            settings.llm_provider, _model_name(settings))
-
-
-def _model_name(settings) -> str:
-    return {"anthropic": settings.anthropic_model, "openai": settings.openai_model
-            }.get(settings.llm_provider, settings.ollama_model)
 
 
 def _print_report(scores: list[Score], summary: dict, out=sys.stdout) -> None:
@@ -258,6 +267,8 @@ def _print_report(scores: list[Score], summary: dict, out=sys.stdout) -> None:
             extra.append(f"cql={s.got_cql!r}")
         if s.cql_rejected:
             extra.append(f"cql_rejected={s.cql_rejected}")
+        if s.retrieval_miss:
+            extra.append(f"retrieval_miss={s.retrieval_miss}")
         print(f"{mark}  {s.id:<34} P={s.precision:.2f} R={s.recall:.2f} "
               + " ".join(extra), file=out)
     print("\n" + json.dumps(summary, indent=2), file=out)
@@ -279,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--record", type=Path, help="save raw live replies to this file")
     ap.add_argument("--no-structured", action="store_true",
                     help="disable the schema-constrained call")
+    ap.add_argument("--no-retrieval", action="store_true",
+                    help="show the model the whole catalog (no family narrowing)")
     ap.add_argument("--only", help="regex on case id or tag")
     ap.add_argument("--json", type=Path, help="write per-case scores + summary as JSON")
     ap.add_argument("--min-exact", type=float, default=None,
@@ -303,14 +316,21 @@ def main(argv: list[str] | None = None) -> int:
     meta: dict[str, Any] = {}
     if args.replay:
         rec = json.loads(args.replay.read_text(encoding="utf-8"))
-        agent, provider = ReplayAgent(rec["replies"]), rec.get("provider", "replay")
+        tiers = [Tier(ReplayAgent(rec["replies"]), rec.get("provider", "replay"),
+                      rec.get("model") or "")]
         meta = {k: rec.get(k) for k in ("provider", "model", "recorded_at")}
     else:
-        agent, provider, model = _live_agent()
-        meta = {"provider": provider, "model": model}
+        from .resolver import min_confidence_from_env, tiers_from_settings
+        tiers = tiers_from_settings()
+        meta = {"provider": tiers[0].provider, "model": tiers[0].model,
+                "fallback": tiers[1].label if len(tiers) > 1 else None,
+                "min_confidence": min_confidence_from_env()}
 
-    scores, raw = asyncio.run(run_cases(cases, catalog, spec, agent, provider=provider,
-                                        structured=not args.no_structured))
+    from .retrieval import Retriever
+    retriever = None if args.no_retrieval else Retriever()
+    scores, raw = asyncio.run(run_cases(
+        cases, catalog, spec, tiers, structured=not args.no_structured,
+        retriever=retriever, min_confidence=meta.get("min_confidence") or DEFAULT_MIN_CONFIDENCE))
     summary = {**meta, **summarize(scores)}
     _print_report(scores, summary)
 
