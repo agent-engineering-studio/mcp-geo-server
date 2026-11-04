@@ -11,6 +11,7 @@ the Docker ``bootstrap`` image stage.
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import subprocess
@@ -27,6 +28,10 @@ from .tools.workspaces import geo_create_workspace
 logger = logging.getLogger("mcp_geo_server.ingest")
 
 
+# PostgreSQL NAMEDATALEN - 1.
+PG_IDENTIFIER_MAX = 63
+
+
 def sanitize(name: str) -> str:
     """Turn a name into a safe, unquoted Postgres/GeoServer identifier.
 
@@ -37,6 +42,13 @@ def sanitize(name: str) -> str:
     cleaned = re.sub(r"[^a-z0-9_]+", "_", name.lower()).strip("_")
     if cleaned and cleaned[0].isdigit():
         cleaned = f"_{cleaned}"
+    if len(cleaned) > PG_IDENTIFIER_MAX:
+        # Same shortening GDAL's PostgreSQL driver applies to `-nln`, so the
+        # table ogr2ogr creates and the feature type we publish share one
+        # name. Truncating differently made GeoServer look for a table that
+        # does not exist (HTTP 400 on the ISPRA hydraulic mosaic, 108 chars).
+        digest = hashlib.md5(cleaned.encode()).hexdigest()[:8]
+        cleaned = f"{cleaned[:PG_IDENTIFIER_MAX - 9]}_{digest}"
     return cleaned or "layer"
 
 
